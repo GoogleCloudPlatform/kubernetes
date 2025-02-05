@@ -164,11 +164,8 @@ func TestWriteClientCAs(t *testing.T) {
 				"extension-apiserver-authentication": {
 					ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceSystem, Name: "extension-apiserver-authentication"},
 					Data: map[string]string{
-						"requestheader-username-headers":     `[]`,
-						"requestheader-group-headers":        `[]`,
-						"requestheader-extra-headers-prefix": `[]`,
-						"requestheader-client-ca-file":       string(anotherRandomCA),
-						"requestheader-allowed-names":        `["first","second"]`,
+						"requestheader-client-ca-file": string(anotherRandomCA),
+						"requestheader-allowed-names":  `["first","second"]`,
 					},
 				},
 			},
@@ -198,11 +195,7 @@ func TestWriteClientCAs(t *testing.T) {
 				"extension-apiserver-authentication": {
 					ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceSystem, Name: "extension-apiserver-authentication"},
 					Data: map[string]string{
-						"requestheader-username-headers":     `[]`,
-						"requestheader-group-headers":        `[]`,
-						"requestheader-extra-headers-prefix": `[]`,
-						"requestheader-client-ca-file":       string(anotherRandomCA),
-						"requestheader-allowed-names":        `[]`,
+						"requestheader-client-ca-file": string(anotherRandomCA),
 					},
 				},
 			},
@@ -435,13 +428,10 @@ func TestWriteClientCAs(t *testing.T) {
 				&corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceSystem, Name: "extension-apiserver-authentication"},
 					Data: map[string]string{
-						"requestheader-username-headers":     `[]`,
-						"requestheader-group-headers":        `[]`,
-						"requestheader-extra-headers-prefix": `[]`,
-						"requestheader-client-ca-file":       string(anotherRandomCA),
-						"requestheader-allowed-names":        `[]`,
-						"unknown-key":                        `["important","future","values"]`,
-						"unknown-key-empty":                  "",
+						"requestheader-client-ca-file": string(anotherRandomCA),
+						"requestheader-group-headers":  `[]`,
+						"unknown-key":                  `["important","future","values"]`,
+						"unknown-key-empty":            "",
 					},
 				},
 			},
@@ -449,13 +439,10 @@ func TestWriteClientCAs(t *testing.T) {
 				"extension-apiserver-authentication": {
 					ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceSystem, Name: "extension-apiserver-authentication"},
 					Data: map[string]string{
-						"requestheader-username-headers":     `[]`,
-						"requestheader-group-headers":        `["new-group-headers"]`,
-						"requestheader-extra-headers-prefix": `[]`,
-						"requestheader-client-ca-file":       string(anotherRandomCA),
-						"requestheader-allowed-names":        `[]`,
-						"unknown-key":                        `["important","future","values"]`,
-						"unknown-key-empty":                  "",
+						"requestheader-group-headers":  `["new-group-headers"]`,
+						"requestheader-client-ca-file": string(anotherRandomCA),
+						"unknown-key":                  `["important","future","values"]`,
+						"unknown-key-empty":            "",
 					},
 				},
 			},
