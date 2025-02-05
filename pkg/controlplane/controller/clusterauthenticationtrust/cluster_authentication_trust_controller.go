@@ -149,8 +149,6 @@ func (c *Controller) syncConfigMap() error {
 	} else if err != nil {
 		return err
 	}
-	// keep the original to diff against later before updating
-	authConfigMap := originalAuthConfigMap.DeepCopy()
 
 	existingAuthenticationInfo, err := getClusterAuthenticationInfoFor(originalAuthConfigMap.Data)
 	if err != nil {
@@ -160,10 +158,24 @@ func (c *Controller) syncConfigMap() error {
 	if err != nil {
 		return err
 	}
-	authConfigMap.Data, err = getConfigMapDataFor(combinedInfo)
+	authenticationConfigData, err := getConfigMapDataFor(combinedInfo)
 	if err != nil {
 		return err
 	}
+
+	// If there are keys in the original map that we failed to construct from our
+	// config, we re-add them to keep forward compatibility. This is to avoid dueling
+	// where an older kube-apiserver instance would otherwise attempt to delete
+	// a key from a newer-version kube-apiserver instance during an upgrade.
+	for k, v := range originalAuthConfigMap.Data {
+		if _, ok := authenticationConfigData[k]; !ok {
+			authenticationConfigData[k] = v
+		}
+	}
+
+	// keep the original to diff against later before updating
+	authConfigMap := originalAuthConfigMap.DeepCopy()
+	authConfigMap.Data = authenticationConfigData
 
 	if equality.Semantic.DeepEqual(authConfigMap, originalAuthConfigMap) {
 		klog.V(5).Info("no changes to configmap")
