@@ -3371,7 +3371,7 @@ func TestListPlugins(t *testing.T) {
 				_ = f.Close()
 			}()
 			got := f.ListPlugins()
-			if diff := cmp.Diff(tt.want, got, statusCmpOpts...); diff != "" {
+			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("Unexpected plugins (-want,+got):\n%s", diff)
 			}
 		})
