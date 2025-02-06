@@ -46,6 +46,8 @@ var preFilterStateCmpOpts = []cmp.Option{
 		p2.sort()
 		return p1[0] == p2[0] && p1[1] == p2[1]
 	}),
+}
+var statusCmpOpts = []cmp.Option{
 	cmp.Comparer(func(s1 *framework.Status, s2 *framework.Status) bool {
 		if s1 == nil || s2 == nil {
 			return s1.IsSuccess() && s2.IsSuccess()
@@ -3421,7 +3423,7 @@ func TestPreFilterDisabled(t *testing.T) {
 	cycleState := framework.NewCycleState()
 	gotStatus := p.(*PodTopologySpread).Filter(ctx, cycleState, pod, nodeInfo)
 	wantStatus := framework.AsStatus(fmt.Errorf(`reading "PreFilterPodTopologySpread" from cycleState: %w`, framework.ErrNotFound))
-	if diff := cmp.Diff(wantStatus, gotStatus, preFilterStateCmpOpts...); diff != "" {
+	if diff := cmp.Diff(wantStatus, gotStatus, statusCmpOpts...); diff != "" {
 		t.Errorf("Status does not match (-want,+got):\n%s", diff)
 	}
 }
