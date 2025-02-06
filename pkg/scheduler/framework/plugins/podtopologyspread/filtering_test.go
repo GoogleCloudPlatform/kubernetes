@@ -40,7 +40,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-var preFilterStateCmpOpts = []cmp.Option{
+var stateCmpOpts = []cmp.Option{
 	cmp.Comparer(func(p1, p2 criticalPaths) bool {
 		p1.sort()
 		p2.sort()
@@ -1511,7 +1511,7 @@ func TestPreFilterState(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to get PreFilterState from cyclestate: %v", err)
 			}
-			if diff := cmp.Diff(tt.want, got, preFilterStateCmpOpts...); diff != "" {
+			if diff := cmp.Diff(tt.want, got, stateCmpOpts...); diff != "" {
 				t.Errorf("PodTopologySpread#PreFilter() returned unexpected prefilter status: diff (-want,+got):\n%s", diff)
 			}
 		})
@@ -2006,7 +2006,7 @@ func TestPreFilterStateAddPod(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if diff := cmp.Diff(tt.want, state, preFilterStateCmpOpts...); diff != "" {
+			if diff := cmp.Diff(tt.want, state, stateCmpOpts...); diff != "" {
 				t.Errorf("PodTopologySpread.AddPod() returned diff (-want,+got):\n%s", diff)
 			}
 		})
@@ -2314,7 +2314,7 @@ func TestPreFilterStateRemovePod(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if diff := cmp.Diff(tt.want, state, preFilterStateCmpOpts...); diff != "" {
+			if diff := cmp.Diff(tt.want, state, stateCmpOpts...); diff != "" {
 				t.Errorf("PodTopologySpread.RemovePod() returned diff (-want,+got):\n%s", diff)
 			}
 		})
