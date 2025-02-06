@@ -975,7 +975,7 @@ func TestSchedulerNoPhantomPodAfterDelete(t *testing.T) {
 		}
 		if err == nil {
 			t.Errorf("unexpected error. wanted %v, got %v", expectErr, err)
-		} else if diff := cmp.Diff(expectErr.Error(), err.Error()); diff != "" {
+		} else if diff := cmp.Diff(expectErr, err, schedulerCmpOpts...); diff != "" {
 			t.Errorf("unexpected error (-want,+got):\n%s", diff)
 		}
 	case <-time.After(wait.ForeverTestTimeout):
