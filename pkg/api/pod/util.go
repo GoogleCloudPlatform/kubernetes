@@ -748,11 +748,11 @@ func podLifecycleSleepActionInUse(podSpec *api.PodSpec) bool {
 		if c.Lifecycle == nil {
 			return true
 		}
-		if c.Lifecycle.PreStop != nil && c.Lifecycle.PreStop.Sleep != nil {
+		if lc := c.Lifecycle.PreStop; lc != nil && lc.Sleep != nil {
 			inUse = true
 			return false
 		}
-		if c.Lifecycle.PostStart != nil && c.Lifecycle.PostStart.Sleep != nil {
+		if lc := c.Lifecycle.PostStart; lc != nil && lc.Sleep != nil {
 			inUse = true
 			return false
 		}
@@ -770,11 +770,11 @@ func podLifecycleSleepActionZeroValueInUse(podSpec *api.PodSpec) bool {
 		if c.Lifecycle == nil {
 			return true
 		}
-		if c.Lifecycle.PreStop != nil && c.Lifecycle.PreStop.Sleep != nil && c.Lifecycle.PreStop.Sleep.Seconds == 0 {
+		if lc := c.Lifecycle.PreStop; lc != nil && lc.Sleep != nil && lc.Sleep.Seconds == 0 {
 			inUse = true
 			return false
 		}
-		if c.Lifecycle.PostStart != nil && c.Lifecycle.PostStart.Sleep != nil && c.Lifecycle.PostStart.Sleep.Seconds == 0 {
+		if lc := c.Lifecycle.PostStart; lc != nil && lc.Sleep != nil && lc.Sleep.Seconds == 0 {
 			inUse = true
 			return false
 		}
