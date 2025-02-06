@@ -2770,7 +2770,7 @@ func TestFindFitSomeError(t *testing.T) {
 	}
 
 	if diff := cmp.Diff(sets.New("MatchFilter"), diagnosis.UnschedulablePlugins); diff != "" {
-		t.Errorf("Unexpected unschedulablePlugins: (-want, +got): \n%s", diff)
+		t.Errorf("Unexpected unschedulablePlugins: (-want, +got):\n%s", diff)
 	}
 
 	for _, node := range nodes {
