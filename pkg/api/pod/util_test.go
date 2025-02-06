@@ -4291,7 +4291,7 @@ func TestValidateAllowPodLifecycleSleepActionZeroValue(t *testing.T) {
 			wantOption: false,
 		},
 		{
-			name: "PreStop",
+			name: "PreStop with zero seconds",
 			podSpec: &api.PodSpec{
 				Containers: []api.Container{
 					{
@@ -4308,7 +4308,7 @@ func TestValidateAllowPodLifecycleSleepActionZeroValue(t *testing.T) {
 			wantOption: true,
 		},
 		{
-			name: "PostStart",
+			name: "PostStart with zero seconds",
 			podSpec: &api.PodSpec{
 				Containers: []api.Container{
 					{
@@ -4330,7 +4330,7 @@ func TestValidateAllowPodLifecycleSleepActionZeroValue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			gotOptions := GetValidationOptionsFromPodSpecAndMeta(&api.PodSpec{}, tc.podSpec, nil, nil)
 			if tc.wantOption != gotOptions.AllowPodLifecycleSleepActionZeroValue {
-				t.Errorf("Got AllowPodLifecycleSleepActionZeroValue=%t, want %t", gotOptions.AllowPodLifecycleSleepActionZeroValue, tc.wantOption)
+				t.Errorf("%s: Got AllowPodLifecycleSleepActionZeroValue=%t, want %t", tc.name, gotOptions.AllowPodLifecycleSleepActionZeroValue, tc.wantOption)
 			}
 		})
 	}
