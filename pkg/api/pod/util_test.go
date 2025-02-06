@@ -4328,7 +4328,7 @@ func TestValidateAllowPodLifecycleSleepActionZeroValue(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotOptions := GetValidationOptionsFromPodSpecAndMeta(tc.podSpec, &api.PodSpec{}, nil, nil)
+			gotOptions := GetValidationOptionsFromPodSpecAndMeta(&api.PodSpec{}, tc.podSpec, nil, nil)
 			if tc.wantOption != gotOptions.AllowPodLifecycleSleepActionZeroValue {
 				t.Errorf("Got AllowPodLifecycleSleepActionZeroValue=%t, want %t", gotOptions.AllowPodLifecycleSleepActionZeroValue, tc.wantOption)
 			}

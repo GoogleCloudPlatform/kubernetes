@@ -417,7 +417,7 @@ func GetValidationOptionsFromPodSpecAndMeta(podSpec, oldPodSpec *api.PodSpec, po
 			}
 		}
 
-		opts.AllowPodLifecycleSleepActionZeroValue = opts.AllowPodLifecycleSleepActionZeroValue || podLifecycleSleepActionZeroValueInUse(podSpec)
+		opts.AllowPodLifecycleSleepActionZeroValue = opts.AllowPodLifecycleSleepActionZeroValue || podLifecycleSleepActionZeroValueInUse(oldPodSpec)
 		// If oldPod has resize policy set on the restartable init container, we must allow it
 		opts.AllowSidecarResizePolicy = hasRestartableInitContainerResizePolicy(oldPodSpec)
 	}
