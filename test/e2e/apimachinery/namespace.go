@@ -477,11 +477,11 @@ func unstructuredToNamespace(obj *unstructured.Unstructured) (*v1.Namespace, err
 	return ns, err
 }
 
-var _ = SIGDescribe("OrderedNamespaceDeletion", framework.WithSerial(), func() {
+var _ = SIGDescribe("OrderedNamespaceDeletion", func() {
 	f := framework.NewDefaultFramework("namespacedeletion")
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
-	f.It("namespace deletion should delete pod first", framework.WithFeatureGate(features.OrderedNamespaceDeletion), func(ctx context.Context) {
+	f.It("namespace deletion should delete pod first", feature.OrderedNamespaceDeletion, framework.WithFeatureGate(features.OrderedNamespaceDeletion), func(ctx context.Context) {
 		ensurePodsAreRemovedFirstInOrderedNamespaceDeletion(ctx, f)
 	})
 })
