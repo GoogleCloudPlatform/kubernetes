@@ -171,7 +171,7 @@ func (o *Options) Run() error {
 		if warningMessage != "" {
 			if o.CheckVersionSkew {
 				// Fail if there is a version skew warning
-				return fmt.Errorf("checkVersionSkew: %q", warningMessage)
+				return errors.New(warningMessage)
 			} else {
 				// Print the version skew warning, but don't fail
 				fmt.Fprintf(o.Out, "%s\n", warningMessage)
