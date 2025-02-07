@@ -30,9 +30,9 @@ import (
 // and server versions 1.18, 1.19, and 1.20 would be within the supported version skew for client version 1.19.
 const supportedMinorVersionSkew = 1
 
-// printVersionSkewWarning prints a warning message if the difference between the client and version is greater than
-// the supported version skew , returns the warning string.
-func printVersionSkewWarning(w io.Writer, clientVersion, serverVersion apimachineryversion.Info) (string, error) {
+// getVersionSkewWarning returns a warning message if the difference between the client and version is greater than
+// the supported version skew.
+func getVersionSkewWarning(w io.Writer, clientVersion, serverVersion apimachineryversion.Info) (string, error) {
 	parsedClientVersion, err := version.ParseSemantic(clientVersion.GitVersion)
 	if err != nil {
 		return "", err
@@ -49,7 +49,6 @@ func printVersionSkewWarning(w io.Writer, clientVersion, serverVersion apimachin
 	if majorVersionDifference > 0 || minorVersionDifference > supportedMinorVersionSkew {
 		warningMessage := fmt.Sprintf("version difference between client (%d.%d) and server (%d.%d) exceeds the supported minor version skew of +/-%d\n",
 			parsedClientVersion.Major(), parsedClientVersion.Minor(), parsedServerVersion.Major(), parsedServerVersion.Minor(), supportedMinorVersionSkew)
-		fmt.Fprint(w, warningMessage)
 		return warningMessage, nil
 	}
 	return "", nil

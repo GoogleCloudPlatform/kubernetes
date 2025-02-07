@@ -164,12 +164,18 @@ func (o *Options) Run() error {
 	}
 
 	if versionInfo.ServerVersion != nil {
-		warningMessage, err := printVersionSkewWarning(o.ErrOut, *versionInfo.ClientVersion, *versionInfo.ServerVersion)
+		warningMessage, err := getVersionSkewWarning(o.ErrOut, *versionInfo.ClientVersion, *versionInfo.ServerVersion)
 		if err != nil {
 			return err
 		}
-		if o.CheckVersionSkew && warningMessage != "" {
-			return fmt.Errorf("CheckVersionSkew: %q", warningMessage)
+		if warningMessage != "" {
+			if o.CheckVersionSkew {
+				// Fail if there is a version skew warning
+				return fmt.Errorf("checkVersionSkew: %q", warningMessage)
+			} else {
+				// Print the version skew warning, but don't fail
+				fmt.Fprintf(o.Out, "%s\n", warningMessage)
+			}
 		}
 	}
 	return serverErr
