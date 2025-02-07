@@ -47,7 +47,7 @@ func printVersionSkewWarning(w io.Writer, clientVersion, serverVersion apimachin
 	minorVersionDifference := math.Abs(float64(parsedClientVersion.Minor()) - float64(parsedServerVersion.Minor()))
 
 	if majorVersionDifference > 0 || minorVersionDifference > supportedMinorVersionSkew {
-		warningMessage := fmt.Sprintf("WARNING: version difference between client (%d.%d) and server (%d.%d) exceeds the supported minor version skew of +/-%d\n",
+		warningMessage := fmt.Sprintf("version difference between client (%d.%d) and server (%d.%d) exceeds the supported minor version skew of +/-%d\n",
 			parsedClientVersion.Major(), parsedClientVersion.Minor(), parsedServerVersion.Major(), parsedServerVersion.Minor(), supportedMinorVersionSkew)
 		fmt.Fprint(w, warningMessage)
 		return warningMessage, nil
