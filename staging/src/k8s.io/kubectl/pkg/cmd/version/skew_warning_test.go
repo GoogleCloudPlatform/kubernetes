@@ -87,7 +87,7 @@ func TestPrintVersionSkewWarning(t *testing.T) {
 
 			warningMessage, err := getVersionSkewWarning(output, tc.clientVersion, tc.serverVersion)
 			if err != nil {
-				t.Errorf("error", err)
+				t.Errorf("error: %s", err)
 			}
 
 			if tc.isWarningExpected && warningMessage == "" {
