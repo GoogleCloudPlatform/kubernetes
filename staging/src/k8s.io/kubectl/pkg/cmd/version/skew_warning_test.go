@@ -18,8 +18,9 @@ package version
 
 import (
 	"bytes"
-	apimachineryversion "k8s.io/apimachinery/pkg/version"
 	"testing"
+
+	apimachineryversion "k8s.io/apimachinery/pkg/version"
 )
 
 func TestPrintVersionSkewWarning(t *testing.T) {
@@ -84,12 +85,15 @@ func TestPrintVersionSkewWarning(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			output.Reset()
 
-			printVersionSkewWarning(output, tc.clientVersion, tc.serverVersion)
+			warningMessage, err := getVersionSkewWarning(output, tc.clientVersion, tc.serverVersion)
+			if err != nil {
+				t.Errorf("error", err)
+			}
 
-			if tc.isWarningExpected && output.Len() == 0 {
-				t.Error("warning was expected, but not written to the output")
-			} else if !tc.isWarningExpected && output.Len() > 0 {
-				t.Errorf("warning was not expected, but was written to the output: %s", output.String())
+			if tc.isWarningExpected && warningMessage == "" {
+				t.Error("warning was expected")
+			} else if !tc.isWarningExpected && warningMessage != "" {
+				t.Errorf("warning was not expected. but got %s", warningMessage)
 			}
 		})
 	}
