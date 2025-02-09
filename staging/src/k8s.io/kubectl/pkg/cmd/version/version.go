@@ -174,7 +174,7 @@ func (o *Options) Run() error {
 				return errors.New(warningMessage)
 			} else {
 				// Print the version skew warning, but don't fail
-				fmt.Fprintf(o.Out, "%s\n", warningMessage)
+				fmt.Fprintf(o.ErrOut, "WARNING: %s\n", warningMessage)
 			}
 		}
 	}
