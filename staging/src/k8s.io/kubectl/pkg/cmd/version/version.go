@@ -88,7 +88,7 @@ func NewCmdVersion(f cmdutil.Factory, ioStreams genericiooptions.IOStreams) *cob
 	}
 	cmd.Flags().BoolVar(&o.ClientOnly, "client", o.ClientOnly, "If true, shows client version only (no server required).")
 	cmd.Flags().StringVarP(&o.Output, "output", "o", o.Output, "One of 'yaml' or 'json'.")
-	cmd.Flags().BoolVar(&o.CheckVersionSkew, "check-version-skew", o.CheckVersionSkew, "If true, returns an error if the client version exceeds the supported minor version skew of +/-1 relative to the server.")
+	cmd.Flags().BoolVar(&o.CheckVersionSkew, "check-version-skew", o.CheckVersionSkew, "If true, returns an error if the client version exceeds the supported minor version skew of +/-1 relative to the server and exits with a non-zero exit code.")
 	return cmd
 }
 
