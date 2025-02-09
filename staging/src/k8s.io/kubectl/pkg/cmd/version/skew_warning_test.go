@@ -17,15 +17,12 @@ limitations under the License.
 package version
 
 import (
-	"bytes"
 	"testing"
 
 	apimachineryversion "k8s.io/apimachinery/pkg/version"
 )
 
 func TestPrintVersionSkewWarning(t *testing.T) {
-	output := &bytes.Buffer{}
-
 	testCases := []struct {
 		name              string
 		clientVersion     apimachineryversion.Info
@@ -83,9 +80,7 @@ func TestPrintVersionSkewWarning(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			output.Reset()
-
-			warningMessage, err := getVersionSkewWarning(output, tc.clientVersion, tc.serverVersion)
+			warningMessage, err := getVersionSkewWarning(tc.clientVersion, tc.serverVersion)
 			if err != nil {
 				t.Errorf("error: %s", err)
 			}

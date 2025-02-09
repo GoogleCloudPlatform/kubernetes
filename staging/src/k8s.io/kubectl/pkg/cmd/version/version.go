@@ -164,7 +164,7 @@ func (o *Options) Run() error {
 	}
 
 	if versionInfo.ServerVersion != nil {
-		warningMessage, err := getVersionSkewWarning(o.ErrOut, *versionInfo.ClientVersion, *versionInfo.ServerVersion)
+		warningMessage, err := getVersionSkewWarning(*versionInfo.ClientVersion, *versionInfo.ServerVersion)
 		if err != nil {
 			return err
 		}
