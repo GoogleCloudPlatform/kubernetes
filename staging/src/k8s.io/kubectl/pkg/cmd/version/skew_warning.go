@@ -18,7 +18,6 @@ package version
 
 import (
 	"fmt"
-	"io"
 	"math"
 
 	"k8s.io/apimachinery/pkg/util/version"
@@ -32,7 +31,7 @@ const supportedMinorVersionSkew = 1
 
 // getVersionSkewWarning returns a warning message if the difference between the client and version is greater than
 // the supported version skew.
-func getVersionSkewWarning(w io.Writer, clientVersion, serverVersion apimachineryversion.Info) (string, error) {
+func getVersionSkewWarning(clientVersion, serverVersion apimachineryversion.Info) (string, error) {
 	parsedClientVersion, err := version.ParseSemantic(clientVersion.GitVersion)
 	if err != nil {
 		return "", err
