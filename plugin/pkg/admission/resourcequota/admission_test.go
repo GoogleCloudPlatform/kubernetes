@@ -35,7 +35,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	testcore "k8s.io/client-go/testing"
-	"k8s.io/client-go/tools/cache"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	controlplaneadmission "k8s.io/kubernetes/pkg/controlplane/apiserver/admission"
 	"k8s.io/kubernetes/pkg/quota/v1/install"
@@ -1197,7 +1196,6 @@ func TestAdmitLimitedResourceWithQuota(t *testing.T) {
 		},
 	}
 	kubeClient := fake.NewSimpleClientset(resourceQuota)
-	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{"namespace": cache.MetaNamespaceIndexFunc})
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
@@ -1214,12 +1212,15 @@ func TestAdmitLimitedResourceWithQuota(t *testing.T) {
 		},
 	}
 
+	if err := informerFactory.Core().V1().ResourceQuotas().Informer().GetStore().Add(resourceQuota); err != nil {
+		t.Fatalf("Failed to add ResourceQuota(%q) to informer: %v", resourceQuota.ObjectMeta.Name, err)
+	}
+
 	handler, err := createHandlerWithConfig(kubeClient, informerFactory, config, stopCh)
 	if err != nil {
 		t.Errorf("Error occurred while creating admission plugin: %v", err)
 	}
 
-	indexer.Add(resourceQuota)
 	newPod := validPod("allowed-pod", 1, getResourceRequirements(getResourceList("3", "2Gi"), getResourceList("", "")))
 	err = handler.Validate(context.TODO(), admission.NewAttributesRecord(newPod, nil, api.Kind("Pod").WithVersion("version"), newPod.Namespace, newPod.Name, corev1.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil), nil)
 	if err != nil {
@@ -1251,14 +1252,17 @@ func TestAdmitLimitedResourceWithMultipleQuota(t *testing.T) {
 			},
 		},
 	}
-	kubeClient := fake.NewSimpleClientset(resourceQuota1, resourceQuota2)
-	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{"namespace": cache.MetaNamespaceIndexFunc})
+	kubeClient := fake.NewClientset(resourceQuota1, resourceQuota2)
+	informerFactory := informers.NewSharedInformerFactory(kubeClient, 0)
+	if err := informerFactory.Core().V1().ResourceQuotas().Informer().GetStore().Add(resourceQuota1); err != nil {
+		t.Fatalf("Failed to add ResourceQuota(%q) to informer: %v", resourceQuota1.ObjectMeta.Name, err)
+	}
+	if err := informerFactory.Core().V1().ResourceQuotas().Informer().GetStore().Add(resourceQuota2); err != nil {
+		t.Fatalf("Failed to add ResourceQuota(%q) to informer: %v", resourceQuota2.ObjectMeta.Name, err)
+	}
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	informerFactory := informers.NewSharedInformerFactory(kubeClient, 0)
-
-	// disable consumption of cpu unless there is a covering quota.
 	// disable consumption of cpu unless there is a covering quota.
 	config := &resourcequotaapi.Configuration{
 		LimitedResources: []resourcequotaapi.LimitedResource{
@@ -1274,8 +1278,6 @@ func TestAdmitLimitedResourceWithMultipleQuota(t *testing.T) {
 		t.Errorf("Error occurred while creating admission plugin: %v", err)
 	}
 
-	indexer.Add(resourceQuota1)
-	indexer.Add(resourceQuota2)
 	newPod := validPod("allowed-pod", 1, getResourceRequirements(getResourceList("3", "2Gi"), getResourceList("", "")))
 	err = handler.Validate(context.TODO(), admission.NewAttributesRecord(newPod, nil, api.Kind("Pod").WithVersion("version"), newPod.Namespace, newPod.Name, corev1.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil), nil)
 	if err != nil {
@@ -1297,13 +1299,14 @@ func TestAdmitLimitedResourceWithQuotaThatDoesNotCover(t *testing.T) {
 		},
 	}
 	kubeClient := fake.NewSimpleClientset(resourceQuota)
-	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{"namespace": cache.MetaNamespaceIndexFunc})
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
 	informerFactory := informers.NewSharedInformerFactory(kubeClient, 0)
+	if err := informerFactory.Core().V1().ResourceQuotas().Informer().GetStore().Add(resourceQuota); err != nil {
+		t.Fatalf("Failed to add ResourceQuota(%q) to informer: %v", resourceQuota.ObjectMeta.Name, err)
+	}
 
-	// disable consumption of cpu unless there is a covering quota.
 	// disable consumption of cpu unless there is a covering quota.
 	config := &resourcequotaapi.Configuration{
 		LimitedResources: []resourcequotaapi.LimitedResource{
@@ -1319,7 +1322,6 @@ func TestAdmitLimitedResourceWithQuotaThatDoesNotCover(t *testing.T) {
 		t.Errorf("Error occurred while creating admission plugin: %v", err)
 	}
 
-	indexer.Add(resourceQuota)
 	newPod := validPod("not-allowed-pod", 1, getResourceRequirements(getResourceList("3", "2Gi"), getResourceList("", "")))
 	err = handler.Validate(context.TODO(), admission.NewAttributesRecord(newPod, nil, api.Kind("Pod").WithVersion("version"), newPod.Namespace, newPod.Name, corev1.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil), nil)
 	if err == nil {
@@ -1962,21 +1964,24 @@ func TestAdmitLimitedScopeWithCoverQuota(t *testing.T) {
 		if testCase.anotherQuota != nil {
 			kubeClient = fake.NewSimpleClientset(resourceQuota, testCase.anotherQuota)
 		}
-		indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{"namespace": cache.MetaNamespaceIndexFunc})
 		stopCh := make(chan struct{})
 		defer close(stopCh)
 
 		informerFactory := informers.NewSharedInformerFactory(kubeClient, 0)
+		if err := informerFactory.Core().V1().ResourceQuotas().Informer().GetStore().Add(resourceQuota); err != nil {
+			t.Fatalf("Failed to add ResourceQuota(%q) to informer: %v", resourceQuota.ObjectMeta.Name, err)
+		}
+		if testCase.anotherQuota != nil {
+			if err := informerFactory.Core().V1().ResourceQuotas().Informer().GetStore().Add(testCase.anotherQuota); err != nil {
+				t.Fatalf("Failed to add ResourceQuota(%q) to informer: %v", testCase.anotherQuota.ObjectMeta.Name, err)
+			}
+		}
 
 		handler, err := createHandlerWithConfig(kubeClient, informerFactory, config, stopCh)
 		if err != nil {
 			t.Errorf("Error occurred while creating admission plugin: %v", err)
 		}
 
-		indexer.Add(resourceQuota)
-		if testCase.anotherQuota != nil {
-			indexer.Add(testCase.anotherQuota)
-		}
 		err = handler.Validate(context.TODO(), admission.NewAttributesRecord(newPod, nil, api.Kind("Pod").WithVersion("version"), newPod.Namespace, newPod.Name, corev1.Resource("pods").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil), nil)
 		if testCase.expErr == "" {
 			if err != nil {
