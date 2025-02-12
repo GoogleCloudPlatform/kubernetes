@@ -190,7 +190,8 @@ type Proxier struct {
 	networkInterfacer proxyutil.NetworkInterfacer
 
 	// staleChains contains information about chains to be deleted later
-	staleChains map[string]time.Time
+	staleChains              map[string]time.Time
+	staleChainsCleanupFailed bool
 
 	// serviceCIDRs is a comma separated list of ServiceCIDRs belonging to the IPFamily
 	// which proxier is operating on, can be directly consumed by knftables.
@@ -1219,6 +1220,7 @@ func (proxier *Proxier) syncProxyRules() {
 
 	// If there are sufficiently-stale chains left over from previous transactions,
 	// try to delete them now.
+	proxier.staleChainsCleanupFailed = false
 	if len(proxier.staleChains) > 0 {
 		oneSecondAgo := start.Add(-time.Second)
 		tx := proxier.nftables.NewTransaction()
@@ -1242,6 +1244,7 @@ func (proxier *Proxier) syncProxyRules() {
 				proxier.logger.Error(err, "Unable to delete stale chains; will retry later")
 				metrics.NFTablesCleanupFailuresTotal.WithLabelValues(string(proxier.ipFamily)).Inc()
 				doFullSync = true
+				proxier.staleChainsCleanupFailed = true
 
 				// Log failed transaction and list full kube-proxy table.
 				proxier.logFailure(tx)
@@ -1261,6 +1264,26 @@ func (proxier *Proxier) syncProxyRules() {
 	if proxier.ipFamily == v1.IPv6Protocol {
 		ipX = "ip6"
 		ipvX_addr = "ipv6_addr"
+	}
+
+	var existingChains sets.Set[string]
+	existingChainsList, err := proxier.nftables.List(context.TODO(), "chain")
+	if err == nil {
+		existingChains = sets.New(existingChainsList...)
+	} else {
+		proxier.logger.Error(err, "Failed to list existing chains")
+	}
+	var existingAffinitySets sets.Set[string]
+	existingSets, err := proxier.nftables.List(context.TODO(), "sets")
+	if err == nil {
+		existingAffinitySets = sets.New[string]()
+		for _, set := range existingSets {
+			if isAffinitySetName(set) {
+				existingAffinitySets.Insert(set)
+			}
+		}
+	} else {
+		proxier.logger.Error(err, "Failed to list existing sets")
 	}
 
 	// Accumulate service/endpoint chains and affinity sets to keep.
@@ -1306,7 +1329,8 @@ func (proxier *Proxier) syncProxyRules() {
 		// Note the endpoint chains that will be used
 		for _, ep := range allLocallyReachableEndpoints {
 			if epInfo, ok := ep.(*endpointInfo); ok {
-				ensureChain(epInfo.chainName, tx, activeChains, skipServiceUpdate)
+				ensureChain(epInfo.chainName, tx, activeChains, skipServiceUpdate ||
+					proxier.epChainUpdated(existingChains, existingAffinitySets, svcInfo, epInfo))
 				// Note the affinity sets that will be used
 				if svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP {
 					activeAffinitySets.Insert(epInfo.affinitySetName)
@@ -1748,6 +1772,10 @@ func (proxier *Proxier) syncProxyRules() {
 				continue
 			}
 
+			if proxier.epChainUpdated(existingChains, existingAffinitySets, svcInfo, epInfo) {
+				// If the EP chain is already updated, we can skip it.
+				continue
+			}
 			endpointChain := epInfo.chainName
 
 			// Handle traffic that loops back to the originator with SNAT.
@@ -1787,9 +1815,8 @@ func (proxier *Proxier) syncProxyRules() {
 	// short amount of time later that the chain is now unreferenced. So we flush them
 	// now, and record the time that they become stale in staleChains so they can be
 	// deleted later.
-	existingChains, err := proxier.nftables.List(context.TODO(), "chains")
-	if err == nil {
-		for _, chain := range existingChains {
+	if existingChains != nil {
+		for chain := range existingChains {
 			if isServiceChainName(chain) {
 				if !activeChains.Has(chain) {
 					tx.Flush(&knftables.Chain{
@@ -1801,21 +1828,20 @@ func (proxier *Proxier) syncProxyRules() {
 				}
 			}
 		}
-	} else if !knftables.IsNotFound(err) {
+	} else {
 		proxier.logger.Error(err, "Failed to list nftables chains: stale chains will not be deleted")
 	}
 
 	// OTOH, we can immediately delete any stale affinity sets
-	existingSets, err := proxier.nftables.List(context.TODO(), "sets")
-	if err == nil {
-		for _, set := range existingSets {
-			if isAffinitySetName(set) && !activeAffinitySets.Has(set) {
+	if existingAffinitySets != nil {
+		for set := range existingAffinitySets {
+			if !activeAffinitySets.Has(set) {
 				tx.Delete(&knftables.Set{
 					Name: set,
 				})
 			}
 		}
-	} else if !knftables.IsNotFound(err) {
+	} else {
 		proxier.logger.Error(err, "Failed to list nftables sets: stale affinity sets will not be deleted")
 	}
 
@@ -1880,6 +1906,30 @@ func (proxier *Proxier) syncProxyRules() {
 		// Finish housekeeping, clear stale conntrack entries for UDP Services
 		conntrack.CleanStaleEntries(proxier.conntrack, proxier.ipFamily, proxier.svcPortMap, proxier.endpointsMap)
 	}
+}
+
+// epChainUpdated returns true if the EP chain doesn't need to be updated.
+func (proxier *Proxier) epChainUpdated(existingChains, existingAffinitySets sets.Set[string], svcInfo *servicePortInfo, epInfo *endpointInfo) bool {
+	if existingChains == nil || existingAffinitySets == nil {
+		// listing existing objects failed, can't skip updating
+		return false
+	}
+	if _, ok := proxier.staleChains[epInfo.chainName]; ok || proxier.staleChainsCleanupFailed {
+		// chain is stale (or could be stale when staleChainsCleanupFailed is true), it was flushed before, needs update
+		return false
+	}
+	// EP chain can have up to 3 rules:
+	// - loopback masquerade rule
+	//   - includes the endpoint IP
+	// - affinity rule when session affinity is set to ClusterIP
+	//   - includes the affinity set name
+	// - DNAT rule
+	//   - includes the endpoint IP + port
+	// EP chain name includes the endpoint IP + port => loopback and DNAT rules are pre-defined by the chain name.
+	// When session affinity is set to ClusterIP, the affinity set is created for local endpoints.
+	// Therefore, we can check that sessions affinity hasn't changes by checking if the affinity set exists.
+	return existingChains.Has(epInfo.chainName) && (svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP && existingAffinitySets.Has(epInfo.affinitySetName) ||
+		svcInfo.SessionAffinityType() != v1.ServiceAffinityClientIP && !existingAffinitySets.Has(epInfo.affinitySetName))
 }
 
 func (proxier *Proxier) writeServiceToEndpointRules(tx *knftables.Transaction, svcInfo *servicePortInfo, svcChain string, endpoints []proxy.Endpoint) {
