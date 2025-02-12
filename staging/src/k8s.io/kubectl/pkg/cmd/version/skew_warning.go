@@ -34,12 +34,12 @@ const supportedMinorVersionSkew = 1
 func getVersionSkewWarning(clientVersion, serverVersion apimachineryversion.Info) (string, error) {
 	parsedClientVersion, err := version.ParseSemantic(clientVersion.GitVersion)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("client version error: %w", err)
 	}
 
 	parsedServerVersion, err := version.ParseSemantic(serverVersion.GitVersion)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("server version error: %w", err)
 	}
 
 	majorVersionDifference := math.Abs(float64(parsedClientVersion.Major()) - float64(parsedServerVersion.Major()))
