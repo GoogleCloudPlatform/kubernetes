@@ -38,8 +38,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/dynamic-resource-allocation/cel"
+	"k8s.io/dynamic-resource-allocation/internal/queue"
 	"k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/scheduler/util/queue"
 	"k8s.io/utils/ptr"
 )
 
