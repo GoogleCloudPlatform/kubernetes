@@ -7699,7 +7699,7 @@ func TestValidatePullPolicy(t *testing.T) {
 func TestValidateResizePolicy(t *testing.T) {
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, true)
 	tSupportedResizeResources := sets.NewString(string(core.ResourceCPU), string(core.ResourceMemory))
-	tSupportedResizePolicies := sets.NewString(string(core.NotRequired), string(core.RestartContainer))
+	tSupportedResizePolicies := sets.NewString(string(core.ResizeRestartPolicyNotRequired), string(core.ResizeRestartPolicyRestartContainer))
 	type T struct {
 		PolicyList       []core.ContainerResizePolicy
 		ExpectError      bool

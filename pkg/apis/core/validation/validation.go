@@ -3375,7 +3375,7 @@ func validatePullPolicy(policy core.PullPolicy, fldPath *field.Path) field.Error
 }
 
 var supportedResizeResources = sets.New(core.ResourceCPU, core.ResourceMemory)
-var supportedResizePolicies = sets.New(core.NotRequired, core.RestartContainer)
+var supportedResizePolicies = sets.New(core.ResizeRestartPolicyNotRequired, core.ResizeRestartPolicyRestartContainer)
 
 func validateResizePolicy(policyList []core.ContainerResizePolicy, fldPath *field.Path, podRestartPolicy *core.RestartPolicy) field.ErrorList {
 	allErrors := field.ErrorList{}
@@ -3395,14 +3395,14 @@ func validateResizePolicy(policyList []core.ContainerResizePolicy, fldPath *fiel
 			allErrors = append(allErrors, field.NotSupported(fldPath, p.ResourceName, sets.List(supportedResizeResources)))
 		}
 		switch p.RestartPolicy {
-		case core.NotRequired, core.RestartContainer:
+		case core.ResizeRestartPolicyNotRequired, core.ResizeRestartPolicyRestartContainer:
 		case "":
 			allErrors = append(allErrors, field.Required(fldPath, ""))
 		default:
 			allErrors = append(allErrors, field.NotSupported(fldPath, p.RestartPolicy, sets.List(supportedResizePolicies)))
 		}
 
-		if *podRestartPolicy == core.RestartPolicyNever && p.RestartPolicy != core.NotRequired {
+		if *podRestartPolicy == core.RestartPolicyNever && p.RestartPolicy != core.ResizeRestartPolicyNotRequired {
 			allErrors = append(allErrors, field.Invalid(fldPath, p.RestartPolicy, "must be 'NotRequired' when `restartPolicy` is 'Never'"))
 		}
 	}
