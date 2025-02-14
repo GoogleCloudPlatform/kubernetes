@@ -46,7 +46,7 @@ func runLivenessTest(pods *[]v1.Pod, f *framework.Framework) {
 	for _, pod := range *pods {
 		podClient := e2epod.NewPodClient(f)
 		containerCount := len(pod.Spec.Containers)
-		gomega.Expect(containerCount).To(gomega.Equal(containerCount), "pod should have a %v countainers but have %v", containerCount, containerCount)
+		gomega.Expect(containerCount).To(gomega.Equal(containerCount), "pod should have a %v containers but have %v", containerCount, containerCount)
 		// At the end of the test, clean up by removing the pod.
 		ginkgo.DeferCleanup(func(ctx context.Context) error {
 			ginkgo.By("deleting the pod")
@@ -68,8 +68,8 @@ func runLivenessTest(pods *[]v1.Pod, f *framework.Framework) {
 			restartCount := e2epod.GetRestartCount(pod)
 
 			if restartCount != 0 {
-				framework.Failf("Restart count of pod %s/%s is now %d (attempt %d)",
-					f.Namespace.Name, pod.Name, restartCount, attempt+1)
+				framework.Failf("Pod %s/%s restarted.", f.Namespace.Name, pod.Name)
+				break
 			}
 
 			time.Sleep(10 * time.Second)
