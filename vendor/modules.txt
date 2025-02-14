@@ -670,8 +670,8 @@ go.opentelemetry.io/auto/sdk/internal/telemetry
 # go.opentelemetry.io/contrib/instrumentation/github.com/emicklei/go-restful/otelrestful v0.42.0
 ## explicit; go 1.19
 go.opentelemetry.io/contrib/instrumentation/github.com/emicklei/go-restful/otelrestful
-# go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.53.0
-## explicit; go 1.21
+# go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
+## explicit; go 1.22.0
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc/internal
 # go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.59.0
