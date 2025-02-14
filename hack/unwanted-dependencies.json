@@ -115,6 +115,7 @@
         "go.etcd.io/etcd/client/pkg/v3",
         "go.etcd.io/etcd/pkg/v3",
         "go.etcd.io/etcd/server/v3",
+        "go.opentelemetry.io/auto/sdk",
         "go.opentelemetry.io/contrib/instrumentation/github.com/emicklei/go-restful/otelrestful",
         "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
         "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
