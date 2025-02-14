@@ -79,7 +79,7 @@ func doPodResizeTests() {
 		testRollback bool
 	}
 
-	noRestart := v1.ResizeRestartPolicyNotRequired
+	noRestart := v1.ResizeRestartPolicyPreferNoRestart
 	doRestart := v1.ResizeRestartPolicyRestartContainer
 	tests := []testCase{
 		{
