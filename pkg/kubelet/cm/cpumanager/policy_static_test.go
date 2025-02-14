@@ -970,10 +970,12 @@ type staticPolicyTestWithResvList struct {
 	stAssignments    state.ContainerCPUAssignments
 	stDefaultCPUSet  cpuset.CPUSet
 	pod              *v1.Pod
+	topologyHint     *topologymanager.TopologyHint
 	expErr           error
 	expNewErr        error
 	expCPUAlloc      bool
 	expCSet          cpuset.CPUSet
+	expUncoreCache   cpuset.CPUSet // represents the expected UncoreCacheIDs
 }
 
 func TestStaticPolicyStartWithResvList(t *testing.T) {
@@ -1157,23 +1159,28 @@ func WithPodUID(pod *v1.Pod, podUID string) *v1.Pod {
 func TestStaticPolicyAddWithUncoreAlignment(t *testing.T) {
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUManagerPolicyAlphaOptions, true)
 
+	newNUMAAffinity := func(bits ...int) bitmask.BitMask {
+		affinity, _ := bitmask.NewBitMask(bits...)
+		return affinity
+	}
+
 	testCases := []staticPolicyTestWithResvList{
 		{
 			description:     "GuPodSingleContainerSaturating, DualSocketHTUncore, ExpectAllocOneUncore, FullUncoreAvail",
-			topo:            topoDualSocketMultiNumaPerSocketUncore,
+			topo:            topoDualSocketSingleNumaPerSocketSMTUncore,
 			numReservedCPUs: 8,
-			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 16
+			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 12
 			cpuPolicyOptions: map[string]string{
 				FullPCPUsOnlyOption:            "true",
 				PreferAlignByUnCoreCacheOption: "true",
 			},
 			stAssignments: state.ContainerCPUAssignments{},
 			// remove partially used uncores from the available CPUs to simulate fully clean slate
-			stDefaultCPUSet: topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUs().Difference(
+			stDefaultCPUSet: topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs().Difference(
 				cpuset.New().Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(0),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(0),
 				).Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(16),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(12),
 				),
 			),
 			pod: WithPodUID(
@@ -1186,23 +1193,22 @@ func TestStaticPolicyAddWithUncoreAlignment(t *testing.T) {
 				"with-app-container-saturating",
 			),
 		},
-
 		{
 			description:     "GuPodMainAndSidecarContainer, DualSocketHTUncore, ExpectAllocOneUncore, FullUncoreAvail",
-			topo:            topoDualSocketMultiNumaPerSocketUncore,
+			topo:            topoDualSocketSingleNumaPerSocketSMTUncore,
 			numReservedCPUs: 8,
-			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 16
+			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 12
 			cpuPolicyOptions: map[string]string{
 				FullPCPUsOnlyOption:            "true",
 				PreferAlignByUnCoreCacheOption: "true",
 			},
 			stAssignments: state.ContainerCPUAssignments{},
 			// remove partially used uncores from the available CPUs to simulate fully clean slate
-			stDefaultCPUSet: topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUs().Difference(
+			stDefaultCPUSet: topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs().Difference(
 				cpuset.New().Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(0),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(0),
 				).Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(16),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(12),
 				),
 			),
 			pod: WithPodUID(
@@ -1218,20 +1224,20 @@ func TestStaticPolicyAddWithUncoreAlignment(t *testing.T) {
 		},
 		{
 			description:     "GuPodSidecarAndMainContainer, DualSocketHTUncore, ExpectAllocOneUncore, FullUncoreAvail",
-			topo:            topoDualSocketMultiNumaPerSocketUncore,
+			topo:            topoDualSocketSingleNumaPerSocketSMTUncore,
 			numReservedCPUs: 8,
-			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 16
+			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 12
 			cpuPolicyOptions: map[string]string{
 				FullPCPUsOnlyOption:            "true",
 				PreferAlignByUnCoreCacheOption: "true",
 			},
 			stAssignments: state.ContainerCPUAssignments{},
 			// remove partially used uncores from the available CPUs to simulate fully clean slate
-			stDefaultCPUSet: topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUs().Difference(
+			stDefaultCPUSet: topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs().Difference(
 				cpuset.New().Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(0),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(0),
 				).Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(16),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(12),
 				),
 			),
 			pod: WithPodUID(
@@ -1247,20 +1253,20 @@ func TestStaticPolicyAddWithUncoreAlignment(t *testing.T) {
 		},
 		{
 			description:     "GuPodMainAndManySidecarContainer, DualSocketHTUncore, ExpectAllocOneUncore, FullUncoreAvail",
-			topo:            topoDualSocketMultiNumaPerSocketUncore,
+			topo:            topoDualSocketSingleNumaPerSocketSMTUncore,
 			numReservedCPUs: 8,
-			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 16
+			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 12
 			cpuPolicyOptions: map[string]string{
 				FullPCPUsOnlyOption:            "true",
 				PreferAlignByUnCoreCacheOption: "true",
 			},
 			stAssignments: state.ContainerCPUAssignments{},
 			// remove partially used uncores from the available CPUs to simulate fully clean slate
-			stDefaultCPUSet: topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUs().Difference(
+			stDefaultCPUSet: topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs().Difference(
 				cpuset.New().Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(0),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(0),
 				).Union(
-					topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUsInUncoreCaches(16),
+					topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(12),
 				),
 			),
 			pod: WithPodUID(
@@ -1276,11 +1282,490 @@ func TestStaticPolicyAddWithUncoreAlignment(t *testing.T) {
 				"with-app-container-and-multi-sidecar",
 			),
 		},
+		{
+			description:     "GuPodMainAndSidecarContainer, DualSocketHTUncore, ExpectAllocTwoUncore",
+			topo:            topoDualSocketSingleNumaPerSocketSMTUncore,
+			numReservedCPUs: 8,
+			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 12
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"12000m", "12000m"},
+						{"2000m", "2000m"},
+					},
+				),
+				"with-app-container-and-sidecar",
+			),
+			expUncoreCache: cpuset.New(0, 1), // expected CPU alignment to UncoreCacheIDs 0-1
+		},
+		{
+			// Compatibility with Topology Hints
+			description:     "GuPodSingleContainer, DualSocketSMTUncore, FullNUMAsAvail, ExpectNUMANodeAffinity, ExpectAllocOneUncore",
+			topo:            topoDualSocketSingleNumaPerSocketSMTUncore,
+			numReservedCPUs: 8,
+			reserved:        cpuset.New(0, 1, 96, 97, 192, 193, 288, 289), // note 4 cpus taken from uncore 0, 4 from uncore 12
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"16000m", "16000m"},
+					},
+				),
+				"with-app-container-saturating",
+			),
+			topologyHint: &topologymanager.TopologyHint{NUMANodeAffinity: newNUMAAffinity(1), Preferred: true}, // hint on NUMANode 1
+			// expected CPU alignment to UncoreCacheID 13 (first fully available Uncore Cache on NUMANode 1)
+			expUncoreCache: cpuset.New(13),
+		},
+		{
+			description:     "GuPodSingleContainer, SingleSocketSMTSmallUncore, ExpectAllocOneUncore",
+			topo:            topoSingleSocketSingleNumaPerSocketSMTSmallUncore,
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 64, 65), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoSingleSocketSingleNumaPerSocketSMTSmallUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"8000m", "8000m"},
+					},
+				),
+				"with-app-container-saturating",
+			),
+		},
+		{
+			// Best-effort policy allows larger containers to be scheduled using a packed method
+			description:     "GuPodSingleContainer, SingleSocketSMTSmallUncore, ExpectAllocTwoUncore",
+			topo:            topoSingleSocketSingleNumaPerSocketSMTSmallUncore, // 8 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 64, 65), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// Uncore 1 fully allocated
+			stDefaultCPUSet: topoSingleSocketSingleNumaPerSocketSMTSmallUncore.CPUDetails.CPUs().Difference(
+				topoSingleSocketSingleNumaPerSocketSMTSmallUncore.CPUDetails.CPUsInUncoreCaches(1),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"12000m", "12000m"}, // larger than topology's uncore cache
+					},
+				),
+				"with-app-container-saturating",
+			),
+			expUncoreCache: cpuset.New(0, 2),
+		},
+		{
+			// Best-effort policy allows larger containers to be scheduled using a packed method
+			description:     "GuPodSingleContainer, SingleSocketNoSMTSmallUncore, FragmentedUncore, ExpectAllocThreeUncore",
+			topo:            topoSingleSocketSingleNumaPerSocketNoSMTSmallUncore, // 4 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 2, 3), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// Uncore 2, 3, and 5 fully allocated
+			stDefaultCPUSet: topoSingleSocketSingleNumaPerSocketNoSMTSmallUncore.CPUDetails.CPUs().Difference(
+				cpuset.New().Union(
+					topoSingleSocketSingleNumaPerSocketNoSMTSmallUncore.CPUDetails.CPUsInUncoreCaches(2),
+				).Union(
+					topoSingleSocketSingleNumaPerSocketNoSMTSmallUncore.CPUDetails.CPUsInUncoreCaches(3),
+				).Union(
+					topoSingleSocketSingleNumaPerSocketNoSMTSmallUncore.CPUDetails.CPUsInUncoreCaches(5),
+				),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"12000m", "12000m"}, // 3 uncore cache's worth of CPUs
+					},
+				),
+				"with-app-container-saturating",
+			),
+			expUncoreCache: cpuset.New(1, 4, 6),
+		},
+		{
+			// Compatibility with Topology Hints
+			description:     "GuPodMultiContainer, DualSocketSMTUncore, FullNUMAsAvail, ExpectNUMANodeAffinity, FragmentedUncore, ExpectAllocThreeUncore",
+			topo:            topoSmallDualSocketSingleNumaPerSocketSMTUncore, // 16 cpus per uncore
+			numReservedCPUs: 8,
+			reserved:        cpuset.New(0, 1, 32, 33, 64, 65, 96, 97), // note 4 cpus taken from uncore 0, 4 from uncore 4
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// uncore 5 fully allocated
+			stDefaultCPUSet: topoSmallDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs().Difference(
+				topoSmallDualSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUsInUncoreCaches(5),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"16000m", "16000m"}, // full uncore cache worth of cpus
+						{"16000m", "16000m"}, // full uncore cache worth of cpus
+						{"8000m", "8000m"},
+					},
+				),
+				"with-multiple-container",
+			),
+			topologyHint:   &topologymanager.TopologyHint{NUMANodeAffinity: newNUMAAffinity(1), Preferred: true}, // hint on NUMANode 1
+			expUncoreCache: cpuset.New(4, 6, 7),
+		},
+		{
+			// Uncore cache alignment following a packed methodology
+			description:     "GuPodMultiContainer, DualSocketSMTUncore, FragmentedUncore, ExpectAllocOneUncore",
+			topo:            topoSmallDualSocketSingleNumaPerSocketNoSMTUncore, // 8 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 32, 33), // note 2 cpus taken from uncore 0, 2 from uncore 4
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// uncore 1 fully allocated
+			stDefaultCPUSet: topoSmallDualSocketSingleNumaPerSocketNoSMTUncore.CPUDetails.CPUs().Difference(
+				topoSmallDualSocketSingleNumaPerSocketNoSMTUncore.CPUDetails.CPUsInUncoreCaches(1),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"4000m", "4000m"},
+						{"2000m", "2000m"},
+					},
+				),
+				"with-multiple-container",
+			),
+		},
+		{
+			// Uncore cache alignment following a packed methodology
+			description:     "GuPodMultiContainer, DualSocketSMTUncore, FragmentedUncore, ExpectAllocTwoUncore",
+			topo:            topoSmallDualSocketSingleNumaPerSocketNoSMTUncore, // 8 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 32, 33), // note 2 cpus taken from uncore 0, 2 from uncore 4
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// uncore 1 fully allocated
+			stDefaultCPUSet: topoSmallDualSocketSingleNumaPerSocketNoSMTUncore.CPUDetails.CPUs().Difference(
+				topoSmallDualSocketSingleNumaPerSocketNoSMTUncore.CPUDetails.CPUsInUncoreCaches(1),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"4000m", "4000m"},
+						{"4000m", "4000m"},
+					},
+				),
+				"with-multiple-container",
+			),
+			expUncoreCache: cpuset.New(0, 2),
+		},
+		{
+			// CPU assignments able to fit on partially available uncore cache
+			description:     "GuPodMultiContainer, LargeSingleSocketSMTUncore, PartialUncoreFit, ExpectAllocTwoUncore",
+			topo:            topoLargeSingleSocketSingleNumaPerSocketSMTUncore, // 16 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 128, 129), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// 4 cpus allocated from uncore 1
+			stDefaultCPUSet: topoLargeSingleSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs().Difference(
+				cpuset.New(8, 9, 136, 137),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"12000m", "12000m"},
+						{"12000m", "12000m"},
+					},
+				),
+				"with-multiple-container",
+			),
+			expUncoreCache: cpuset.New(0, 1),
+		},
+		{
+			// CPU assignments unable to fit on partially available uncore cache
+			description:     "GuPodMultiContainer, LargeSingleSocketSMTUncore, PartialUncoreNoFit, ExpectAllocTwoUncore",
+			topo:            topoLargeSingleSocketSingleNumaPerSocketSMTUncore, // 16 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 128, 129), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// 4 cpus allocated from uncore 1
+			stDefaultCPUSet: topoLargeSingleSocketSingleNumaPerSocketSMTUncore.CPUDetails.CPUs().Difference(
+				cpuset.New(8, 9, 136, 137),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"14000m", "14000m"},
+						{"14000m", "14000m"},
+					},
+				),
+				"with-multiple-container",
+			),
+			expUncoreCache: cpuset.New(2, 3),
+		},
+		{
+			// Compatibility with Topology Hints
+			description:     "GuPodSingleContainer, DualSocketNoSMTUncore, FullNUMAsAvail, ExpectNUMANodeAffinity, MultiNUMA, ExpectAllocTwoUncore",
+			topo:            topoDualSocketMultiNumaPerSocketUncore, // 8 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 2, 3), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"12000m", "12000m"}, // larger than an uncore
+					},
+				),
+				"with-single-container",
+			),
+			topologyHint:   &topologymanager.TopologyHint{NUMANodeAffinity: newNUMAAffinity(3), Preferred: true}, // hint on NUMANode 3
+			expUncoreCache: cpuset.New(18, 19),
+		},
+		{
+			// Full NUMA allocation on split-cache architecture with NPS=2
+			description:     "GuPodLargeSingleContainer, DualSocketNoSMTUncore, FullNUMAsAvail, ExpectAllocFullNUMA",
+			topo:            topoDualSocketMultiNumaPerSocketUncore, // 8 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 2, 3), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoDualSocketMultiNumaPerSocketUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"48000m", "48000m"}, // NUMA's worth of CPUs
+					},
+				),
+				"with-large-single-container",
+			),
+			expUncoreCache: cpuset.New(6, 7, 8, 9, 10, 11), // uncore caches of NUMA Node 1
+		},
+		{
+			// PreferAlignByUnCoreCacheOption will not impact monolithic x86 architectures
+			description:     "GuPodSingleContainer, MonoUncoreCacheHT, ExpectAllocCPUSet",
+			topo:            topoDualSocketSubNumaPerSocketHTMonolithicUncore, // Uncore cache CPUs = Socket CPUs
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 120, 121), // note 4 cpus taken from first 2 cores
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoDualSocketSubNumaPerSocketHTMonolithicUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"6000m", "6000m"},
+					},
+				),
+				"with-single-container",
+			),
+			expCPUAlloc: true,
+			expCSet:     cpuset.New(2, 3, 4, 122, 123, 124),
+		},
+		{
+			// Compatibility with Topology Hints on monolithic x86 architectures
+			description:     "GuPodSingleContainer, MonoUncoreCacheHT, SubNUMACluster, ExpectAllocCPUSet",
+			topo:            topoDualSocketSubNumaPerSocketHTMonolithicUncore, // Uncore cache CPUs = Socket CPUs
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 120, 121), // note 4 cpus taken from first 2 cores
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoDualSocketSubNumaPerSocketHTMonolithicUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"4000m", "4000m"},
+					},
+				),
+				"with-single-container",
+			),
+			topologyHint: &topologymanager.TopologyHint{NUMANodeAffinity: newNUMAAffinity(3), Preferred: true}, // hint on NUMANode 3
+			expCPUAlloc:  true,
+			expCSet:      cpuset.New(90, 91, 210, 211),
+		},
+		{
+			// PreferAlignByUnCoreCacheOption on fragmented monolithic cache x86 architectures
+			description:     "GuPodSingleContainer, MonoUncoreCacheHT, ExpectAllocCPUSet",
+			topo:            topoSingleSocketSingleNumaPerSocketPCoreHTMonolithicUncore, // Uncore cache CPUs = Socket CPUs
+			numReservedCPUs: 2,
+			reserved:        cpuset.New(0, 1),
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// CPUs 4-7 allocated
+			stDefaultCPUSet: topoSingleSocketSingleNumaPerSocketPCoreHTMonolithicUncore.CPUDetails.CPUs().Difference(
+				cpuset.New(4, 5, 6, 7),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"6000m", "6000m"},
+					},
+				),
+				"with-single-container",
+			),
+			expCPUAlloc: true,
+			expCSet:     cpuset.New(2, 3, 8, 9, 16, 17), // identical to default packed assignment
+		},
+		{
+			// Compatibility with ARM-based split cache architectures
+			description:     "GuPodSingleContainer, LargeSingleSocketUncore, ExpectAllocOneUncore",
+			topo:            topoLargeSingleSocketSingleNumaPerSocketUncore, // 8 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 2, 3), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments:   state.ContainerCPUAssignments{},
+			stDefaultCPUSet: topoLargeSingleSocketSingleNumaPerSocketUncore.CPUDetails.CPUs(),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"8000m", "8000m"},
+					},
+				),
+				"with-single-container",
+			),
+		},
+		{
+			// PreferAlignByUnCoreCacheOption on fragmented monolithic cache ARM architectures
+			description:     "GuPodSingleContainer, MonoUncoreCacheHT, ExpectFragmentedAllocCPUSet",
+			topo:            topoSingleSocketSingleNumaPerSocketUncore, // Uncore cache CPUs = Socket CPUs
+			numReservedCPUs: 2,
+			reserved:        cpuset.New(0, 1),
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// CPUs 6-9, 12-15, 18-19 allocated
+			stDefaultCPUSet: topoSingleSocketSingleNumaPerSocketUncore.CPUDetails.CPUs().Difference(
+				cpuset.New().Union(
+					cpuset.New(6, 7, 8, 9),
+				).Union(
+					cpuset.New(12, 13, 14, 15),
+				).Union(
+					cpuset.New(18, 19),
+				),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"12000m", "12000m"},
+					},
+				),
+				"with-single-container",
+			),
+			expCPUAlloc: true,
+			expCSet:     cpuset.New(2, 3, 4, 5, 10, 11, 16, 17, 20, 21, 22, 23), // identical to default packed assignment
+		},
+		{
+			// Best-effort policy can result in multiple uncore caches
+			// Every uncore cache is partially allocated
+			description:     "GuPodSingleContainer, DualSocketUncore, ExpectNUMANodeAffinity, PartialUncore, ExpectAllocTwoUncore",
+			topo:            topoSmallDualSocketSingleNumaPerSocketNoSMTUncore, // 8 cpus per uncore
+			numReservedCPUs: 4,
+			reserved:        cpuset.New(0, 1, 2, 3), // note 4 cpus taken from uncore 0
+			cpuPolicyOptions: map[string]string{
+				FullPCPUsOnlyOption:            "true",
+				PreferAlignByUnCoreCacheOption: "true",
+			},
+			stAssignments: state.ContainerCPUAssignments{},
+			// Every uncore has partially allocated 4 CPUs
+			stDefaultCPUSet: topoSmallDualSocketSingleNumaPerSocketNoSMTUncore.CPUDetails.CPUs().Difference(
+				cpuset.New().Union(
+					cpuset.New(8, 9, 10, 11),
+				).Union(
+					cpuset.New(16, 17, 18, 19),
+				).Union(
+					cpuset.New(24, 25, 26, 27),
+				),
+			),
+			pod: WithPodUID(
+				makeMultiContainerPod(
+					[]struct{ request, limit string }{}, // init container
+					[]struct{ request, limit string }{ // app container
+						{"8000m", "8000m"}, // full uncore cache worth of cpus
+					},
+				),
+				"with-single-container",
+			),
+			topologyHint:   &topologymanager.TopologyHint{NUMANodeAffinity: newNUMAAffinity(0), Preferred: true}, // hint on NUMANode 0
+			expUncoreCache: cpuset.New(0, 1),                                                                     // best-effort across uncore cache 0 and 1
+		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.description, func(t *testing.T) {
-			policy, err := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, testCase.reserved, topologymanager.NewFakeManager(), testCase.cpuPolicyOptions)
+			tm := topologymanager.NewFakeManager()
+			if testCase.topologyHint != nil {
+				tm = topologymanager.NewFakeManagerWithHint(testCase.topologyHint)
+			}
+			policy, err := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, testCase.reserved, tm, testCase.cpuPolicyOptions)
 			if err != nil {
 				t.Fatalf("NewStaticPolicy() failed with %v", err)
 			}
@@ -1298,11 +1783,36 @@ func TestStaticPolicyAddWithUncoreAlignment(t *testing.T) {
 				}
 			}
 
+			if testCase.expCPUAlloc {
+				container := &testCase.pod.Spec.Containers[0]
+				cset, found := st.assignments[string(testCase.pod.UID)][container.Name]
+				if !found {
+					t.Errorf("StaticPolicy Allocate() error (%v). expected container %v to be present in assignments %v",
+						testCase.description, container.Name, st.assignments)
+				}
+				if !testCase.expCSet.Equals(cset) {
+					t.Errorf("StaticPolicy Allocate() error (%v). expected CPUSet %v but got %v",
+						testCase.description, testCase.expCSet, cset)
+				}
+				return
+			}
+
 			uncoreCacheIDs, err := getPodUncoreCacheIDs(st, testCase.topo, testCase.pod)
 			if err != nil {
 				t.Fatalf("uncore cache check: %v", err.Error())
 			}
 			ids := cpuset.New(uncoreCacheIDs...)
+
+			// if the test case specifies expected UncoreCacheIDs, check if there was a proper allocation
+			// otherwise check if a single Uncore Cache was allocated
+			if !testCase.expUncoreCache.IsEmpty() {
+				if !ids.Equals(testCase.expUncoreCache) {
+					t.Errorf("StaticPolicy Allocate() error (%v). expected UncoreCacheIDs %v but got %v",
+						testCase.description, testCase.expUncoreCache, ids)
+				}
+				return
+			}
+
 			if ids.Size() != 1 {
 				t.Fatalf("not all container on the same uncore cache: %s", ids.String())
 			}
