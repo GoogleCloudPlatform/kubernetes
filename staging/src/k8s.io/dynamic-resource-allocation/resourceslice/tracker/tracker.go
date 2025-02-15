@@ -91,11 +91,15 @@ type Options struct {
 }
 
 func StartTracker(ctx context.Context, informerFactory informers.SharedInformerFactory, opts Options) (*Tracker, error) {
-	t := newTracker(informerFactory, opts)
-	return t, t.start(ctx, opts.KubeClient)
+	t := newTracker(ctx, informerFactory, opts)
+	err := t.initInformers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
-func newTracker(informerFactory informers.SharedInformerFactory, opts Options) *Tracker {
+func newTracker(ctx context.Context, informerFactory informers.SharedInformerFactory, opts Options) *Tracker {
 	t := &Tracker{
 		enableAdminControlledAttributes: opts.EnableAdminControlledAttributes,
 		resourceSlices:                  informerFactory.Resource().V1beta1().ResourceSlices().Informer(),
@@ -109,22 +113,14 @@ func newTracker(informerFactory informers.SharedInformerFactory, opts Options) *
 			t.resourceSlicePatches.HasSynced() &&
 			t.deviceClasses.HasSynced()
 	})
-	return t
-}
-
-func (t *Tracker) start(ctx context.Context, kubeClient kubernetes.Interface) error {
-	err := t.initInformers(ctx)
-	if err != nil {
-		return err
-	}
-	// kubeClient is not always set in unit tests.
-	if kubeClient != nil {
+	// KubeClient is not always set in unit tests.
+	if opts.KubeClient != nil {
 		eventBroadcaster := record.NewBroadcaster(record.WithContext(ctx))
 		eventBroadcaster.StartLogging(klog.Infof)
-		eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
+		eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: opts.KubeClient.CoreV1().Events("")})
 		t.recorder = eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "resource_slice_tracker"})
 	}
-	return nil
+	return t
 }
 
 func (t *Tracker) ListPatchedResourceSlices() ([]*resourceapi.ResourceSlice, error) {
@@ -199,44 +195,10 @@ func (t *Tracker) pushEvent(oldObj, newObj interface{}) {
 }
 
 func (t *Tracker) initInformers(ctx context.Context) error {
-	logger := klog.FromContext(ctx)
-
 	sliceHandler := cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			slice, ok := obj.(*resourceapi.ResourceSlice)
-			if !ok {
-				return
-			}
-			logger.V(5).Info("ResourceSlice add", "slice", klog.KObj(slice))
-			t.syncSlice(ctx, slice.Name)
-		},
-		UpdateFunc: func(old, new any) {
-			oldSlice, ok := old.(*resourceapi.ResourceSlice)
-			if !ok {
-				return
-			}
-			newSlice, ok := new.(*resourceapi.ResourceSlice)
-			if !ok {
-				return
-			}
-			if loggerV := logger.V(6); loggerV.Enabled() {
-				loggerV.Info("ResourceSlice update", "slice", klog.KObj(newSlice), "diff", cmp.Diff(oldSlice, newSlice))
-			} else {
-				logger.V(5).Info("ResourceSlice update", "slice", klog.KObj(newSlice))
-			}
-			t.syncSlice(ctx, newSlice.Name)
-		},
-		DeleteFunc: func(obj any) {
-			if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-				obj = tombstone.Obj
-			}
-			slice, ok := obj.(*resourceapi.ResourceSlice)
-			if !ok {
-				return
-			}
-			logger.V(5).Info("ResourceSlice delete", "slice", klog.KObj(slice))
-			t.syncSlice(ctx, slice.Name)
-		},
+		AddFunc:    t.resourceSliceAdd(ctx),
+		UpdateFunc: t.resourceSliceUpdate(ctx),
+		DeleteFunc: t.resourceSliceDelete(ctx),
 	}
 	sliceHandlerReg, err := t.resourceSlices.AddEventHandler(sliceHandler)
 	if err != nil {
@@ -244,47 +206,9 @@ func (t *Tracker) initInformers(ctx context.Context) error {
 	}
 
 	patchHandler := cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			patch, ok := obj.(*resourcealphaapi.ResourceSlicePatch)
-			if !ok {
-				return
-			}
-			logger.V(5).Info("ResourceSlicePatch add", "patch", klog.KObj(patch))
-			for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
-				t.syncSlice(ctx, sliceName)
-			}
-		},
-		UpdateFunc: func(old, new any) {
-			oldPatch, ok := old.(*resourcealphaapi.ResourceSlicePatch)
-			if !ok {
-				return
-			}
-			newPatch, ok := new.(*resourcealphaapi.ResourceSlicePatch)
-			if !ok {
-				return
-			}
-			if loggerV := logger.V(6); loggerV.Enabled() {
-				loggerV.Info("ResourceSlicePatch update", "patch", klog.KObj(newPatch), "diff", cmp.Diff(oldPatch, newPatch))
-			} else {
-				logger.V(5).Info("ResourceSlicePatch update", "patch", klog.KObj(newPatch))
-			}
-			for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
-				t.syncSlice(ctx, sliceName)
-			}
-		},
-		DeleteFunc: func(obj any) {
-			if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-				obj = tombstone.Obj
-			}
-			patch, ok := obj.(*resourcealphaapi.ResourceSlicePatch)
-			if !ok {
-				return
-			}
-			logger.V(5).Info("ResourceSlicePatch delete", "patch", klog.KObj(patch))
-			for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
-				t.syncSlice(ctx, sliceName)
-			}
-		},
+		AddFunc:    t.resourceSlicePatchAdd(ctx),
+		UpdateFunc: t.resourceSlicePatchUpdate(ctx),
+		DeleteFunc: t.resourceSlicePatchDelete(ctx),
 	}
 	patchHandlerReg, err := t.resourceSlicePatches.AddEventHandler(patchHandler)
 	if err != nil {
@@ -292,47 +216,9 @@ func (t *Tracker) initInformers(ctx context.Context) error {
 	}
 
 	classHandler := cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			class, ok := obj.(*resourceapi.DeviceClass)
-			if !ok {
-				return
-			}
-			logger.V(5).Info("DeviceClass add", "class", klog.KObj(class))
-			for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
-				t.syncSlice(ctx, sliceName)
-			}
-		},
-		UpdateFunc: func(old, new any) {
-			oldClass, ok := old.(*resourceapi.DeviceClass)
-			if !ok {
-				return
-			}
-			newClass, ok := new.(*resourceapi.DeviceClass)
-			if !ok {
-				return
-			}
-			if loggerV := logger.V(6); loggerV.Enabled() {
-				loggerV.Info("DeviceClass update", "class", klog.KObj(newClass), "diff", cmp.Diff(oldClass, newClass))
-			} else {
-				logger.V(5).Info("DeviceClass update", "class", klog.KObj(newClass))
-			}
-			for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
-				t.syncSlice(ctx, sliceName)
-			}
-		},
-		DeleteFunc: func(obj any) {
-			if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-				obj = tombstone.Obj
-			}
-			class, ok := obj.(*resourceapi.ResourceSlice)
-			if !ok {
-				return
-			}
-			logger.V(5).Info("DeviceClass delete", "class", klog.KObj(class))
-			for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
-				t.syncSlice(ctx, sliceName)
-			}
-		},
+		AddFunc:    t.deviceClassAdd(ctx),
+		UpdateFunc: t.deviceClassUpdate(ctx),
+		DeleteFunc: t.deviceClassDelete(ctx),
 	}
 	classHandlerReg, err := t.deviceClasses.AddEventHandler(classHandler)
 	if err != nil {
@@ -346,6 +232,159 @@ func (t *Tracker) initInformers(ctx context.Context) error {
 	})
 
 	return nil
+}
+
+func (t *Tracker) resourceSliceAdd(ctx context.Context) func(obj any) {
+	logger := klog.FromContext(ctx)
+	return func(obj any) {
+		slice, ok := obj.(*resourceapi.ResourceSlice)
+		if !ok {
+			return
+		}
+		logger.V(5).Info("ResourceSlice add", "slice", klog.KObj(slice))
+		t.syncSlice(ctx, slice.Name)
+	}
+}
+
+func (t *Tracker) resourceSliceUpdate(ctx context.Context) func(oldObj, newObj any) {
+	logger := klog.FromContext(ctx)
+	return func(oldObj, newObj any) {
+		oldSlice, ok := oldObj.(*resourceapi.ResourceSlice)
+		if !ok {
+			return
+		}
+		newSlice, ok := newObj.(*resourceapi.ResourceSlice)
+		if !ok {
+			return
+		}
+		if loggerV := logger.V(6); loggerV.Enabled() {
+			loggerV.Info("ResourceSlice update", "slice", klog.KObj(newSlice), "diff", cmp.Diff(oldSlice, newSlice))
+		} else {
+			logger.V(5).Info("ResourceSlice update", "slice", klog.KObj(newSlice))
+		}
+		t.syncSlice(ctx, newSlice.Name)
+	}
+}
+
+func (t *Tracker) resourceSliceDelete(ctx context.Context) func(obj any) {
+	logger := klog.FromContext(ctx)
+	return func(obj any) {
+		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+			obj = tombstone.Obj
+		}
+		slice, ok := obj.(*resourceapi.ResourceSlice)
+		if !ok {
+			return
+		}
+		logger.V(5).Info("ResourceSlice delete", "slice", klog.KObj(slice))
+		t.syncSlice(ctx, slice.Name)
+	}
+}
+
+func (t *Tracker) resourceSlicePatchAdd(ctx context.Context) func(obj any) {
+	logger := klog.FromContext(ctx)
+	return func(obj any) {
+		patch, ok := obj.(*resourcealphaapi.ResourceSlicePatch)
+		if !ok {
+			return
+		}
+		logger.V(5).Info("ResourceSlicePatch add", "patch", klog.KObj(patch))
+		for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
+			t.syncSlice(ctx, sliceName)
+		}
+	}
+}
+
+func (t *Tracker) resourceSlicePatchUpdate(ctx context.Context) func(oldObj, newObj any) {
+	logger := klog.FromContext(ctx)
+	return func(oldObj, newObj any) {
+		oldPatch, ok := oldObj.(*resourcealphaapi.ResourceSlicePatch)
+		if !ok {
+			return
+		}
+		newPatch, ok := newObj.(*resourcealphaapi.ResourceSlicePatch)
+		if !ok {
+			return
+		}
+		if loggerV := logger.V(6); loggerV.Enabled() {
+			loggerV.Info("ResourceSlicePatch update", "patch", klog.KObj(newPatch), "diff", cmp.Diff(oldPatch, newPatch))
+		} else {
+			logger.V(5).Info("ResourceSlicePatch update", "patch", klog.KObj(newPatch))
+		}
+		for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
+			t.syncSlice(ctx, sliceName)
+		}
+	}
+}
+
+func (t *Tracker) resourceSlicePatchDelete(ctx context.Context) func(obj any) {
+	logger := klog.FromContext(ctx)
+	return func(obj any) {
+		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+			obj = tombstone.Obj
+		}
+		patch, ok := obj.(*resourcealphaapi.ResourceSlicePatch)
+		if !ok {
+			return
+		}
+		logger.V(5).Info("ResourceSlicePatch delete", "patch", klog.KObj(patch))
+		for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
+			t.syncSlice(ctx, sliceName)
+		}
+	}
+}
+
+func (t *Tracker) deviceClassAdd(ctx context.Context) func(obj any) {
+	logger := klog.FromContext(ctx)
+	return func(obj any) {
+		class, ok := obj.(*resourceapi.DeviceClass)
+		if !ok {
+			return
+		}
+		logger.V(5).Info("DeviceClass add", "class", klog.KObj(class))
+		for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
+			t.syncSlice(ctx, sliceName)
+		}
+	}
+}
+
+func (t *Tracker) deviceClassUpdate(ctx context.Context) func(oldObj, newObj any) {
+	logger := klog.FromContext(ctx)
+	return func(oldObj, newObj any) {
+		oldClass, ok := oldObj.(*resourceapi.DeviceClass)
+		if !ok {
+			return
+		}
+		newClass, ok := newObj.(*resourceapi.DeviceClass)
+		if !ok {
+			return
+		}
+		if loggerV := logger.V(6); loggerV.Enabled() {
+			loggerV.Info("DeviceClass update", "class", klog.KObj(newClass), "diff", cmp.Diff(oldClass, newClass))
+		} else {
+			logger.V(5).Info("DeviceClass update", "class", klog.KObj(newClass))
+		}
+		for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
+			t.syncSlice(ctx, sliceName)
+		}
+	}
+}
+
+func (t *Tracker) deviceClassDelete(ctx context.Context) func(obj any) {
+	logger := klog.FromContext(ctx)
+	return func(obj any) {
+		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+			obj = tombstone.Obj
+		}
+		class, ok := obj.(*resourceapi.ResourceSlice)
+		if !ok {
+			return
+		}
+		logger.V(5).Info("DeviceClass delete", "class", klog.KObj(class))
+		for _, sliceName := range t.resourceSlices.GetIndexer().ListKeys() {
+			t.syncSlice(ctx, sliceName)
+		}
+	}
 }
 
 func (t *Tracker) syncSlice(ctx context.Context, name string) error {

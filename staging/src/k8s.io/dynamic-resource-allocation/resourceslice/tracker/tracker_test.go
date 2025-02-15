@@ -18,9 +18,8 @@ package tracker
 
 import (
 	stdcmp "cmp"
-	"reflect"
+	"context"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
@@ -29,9 +28,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	resourcealphaapi "k8s.io/api/resource/v1alpha3"
 	resourceapi "k8s.io/api/resource/v1beta1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
@@ -49,42 +48,111 @@ const (
 
 type handlerEvent struct {
 	event  handlerEventType
-	oldObj any
-	newObj any
+	oldObj *resourceapi.ResourceSlice
+	newObj *resourceapi.ResourceSlice
+}
+
+type inputEventGenerator struct {
+	addResourceSlice         func(slice *resourceapi.ResourceSlice)
+	deleteResourceSlice      func(name string)
+	addResourceSlicePatch    func(patch *resourcealphaapi.ResourceSlicePatch)
+	deleteResourceSlicePatch func(name string)
+	addDeviceClass           func(class *resourceapi.DeviceClass)
+	deleteDeviceClass        func(name string)
+}
+
+func inputEventGeneratorForTest(ctx context.Context, t *testing.T, tracker *Tracker) inputEventGenerator {
+	return inputEventGenerator{
+		addResourceSlice: func(slice *resourceapi.ResourceSlice) {
+			oldObj, exists, err := tracker.resourceSlices.GetIndexer().Get(slice)
+			require.NoError(t, err)
+			err = tracker.resourceSlices.GetIndexer().Add(slice)
+			require.NoError(t, err)
+			if !exists {
+				tracker.resourceSliceAdd(ctx)(slice)
+			} else if !apiequality.Semantic.DeepEqual(oldObj, slice) {
+				tracker.resourceSliceUpdate(ctx)(oldObj, slice)
+			}
+		},
+		deleteResourceSlice: func(name string) {
+			oldObj, exists, err := tracker.resourceSlices.GetIndexer().GetByKey(name)
+			require.NoError(t, err)
+			require.True(t, exists, "deleting resource slice that was never created")
+			err = tracker.resourceSlices.GetIndexer().Delete(oldObj)
+			require.NoError(t, err)
+			tracker.resourceSliceDelete(ctx)(oldObj)
+		},
+		addResourceSlicePatch: func(patch *resourcealphaapi.ResourceSlicePatch) {
+			oldObj, exists, err := tracker.resourceSlicePatches.GetIndexer().Get(patch)
+			require.NoError(t, err)
+			err = tracker.resourceSlicePatches.GetIndexer().Add(patch)
+			require.NoError(t, err)
+			if !exists {
+				tracker.resourceSlicePatchAdd(ctx)(patch)
+			} else if !apiequality.Semantic.DeepEqual(oldObj, patch) {
+				tracker.resourceSlicePatchUpdate(ctx)(oldObj, patch)
+			}
+		},
+		deleteResourceSlicePatch: func(name string) {
+			oldObj, exists, err := tracker.resourceSlicePatches.GetIndexer().GetByKey(name)
+			require.NoError(t, err)
+			require.True(t, exists, "deleting resource slice patch that was never created")
+			err = tracker.resourceSlicePatches.GetIndexer().Delete(oldObj)
+			require.NoError(t, err)
+			tracker.resourceSlicePatchDelete(ctx)(oldObj)
+		},
+		addDeviceClass: func(class *resourceapi.DeviceClass) {
+			oldObj, exists, err := tracker.deviceClasses.GetIndexer().Get(class)
+			require.NoError(t, err)
+			err = tracker.deviceClasses.GetIndexer().Add(class)
+			require.NoError(t, err)
+			if !exists {
+				tracker.deviceClassAdd(ctx)(class)
+			} else if !apiequality.Semantic.DeepEqual(oldObj, class) {
+				tracker.deviceClassUpdate(ctx)(oldObj, class)
+			}
+		},
+		deleteDeviceClass: func(name string) {
+			oldObj, exists, err := tracker.deviceClasses.GetIndexer().GetByKey(name)
+			require.NoError(t, err)
+			require.True(t, exists, "deleting device class that was never created")
+			err = tracker.deviceClasses.GetIndexer().Delete(oldObj)
+			require.NoError(t, err)
+			tracker.deviceClassDelete(ctx)(oldObj)
+		},
+	}
 }
 
 func TestListPatchedResourceSlices(t *testing.T) {
 	tests := map[string]struct {
 		adminAttrsDisabled    bool
-		initialClasses        []*resourceapi.DeviceClass
-		initialSlices         []*resourceapi.ResourceSlice
-		initialPatches        []*resourcealphaapi.ResourceSlicePatch
-		initialCachedSlices   []*resourceapi.ResourceSlice
+		inputEvents           func(event inputEventGenerator)
 		expectedPatchedSlices []*resourceapi.ResourceSlice
 		expectHandlerEvents   func(t *testing.T, events []handlerEvent)
 		expectEvents          func(t *assert.CollectT, events *v1.EventList)
 	}{
 		"add-slices-no-patches": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{ObjectMeta: metav1.ObjectMeta{Name: "s1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "s2"}},
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlice(&resourceapi.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "s1"}})
+				event.addResourceSlice(&resourceapi.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "s2"}})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{ObjectMeta: metav1.ObjectMeta{Name: "s1"}},
 				{ObjectMeta: metav1.ObjectMeta{Name: "s2"}},
 			},
 			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
-				if assert.Len(t, events, 2) {
-					assert.Equal(t, handlerEventAdd, events[0].event)
-					assert.Equal(t, "s1", events[0].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventAdd, events[1].event)
-					assert.Equal(t, "s2", events[1].newObj.(*resourceapi.ResourceSlice).Name)
+				if !assert.Len(t, events, 2) {
+					return
 				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "s1", events[0].newObj.Name)
+				assert.Equal(t, handlerEventAdd, events[1].event)
+				assert.Equal(t, "s2", events[1].newObj.Name)
 			},
 		},
 		"update-slices-no-patches": {
-			initialCachedSlices: []*resourceapi.ResourceSlice{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlice(&resourceapi.ResourceSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "s1",
 					},
@@ -92,8 +160,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 						// no devices
 						Devices: nil,
 					},
-				},
-				{
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "s2",
 					},
@@ -101,11 +169,10 @@ func TestListPatchedResourceSlices(t *testing.T) {
 						// no devices
 						Devices: nil,
 					},
-				},
-				{ObjectMeta: metav1.ObjectMeta{Name: "no-change"}},
-			},
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "no-change"}})
+
+				event.addResourceSlice(&resourceapi.ResourceSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "s1",
 					},
@@ -115,8 +182,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							{Basic: &resourceapi.BasicDevice{}},
 						},
 					},
-				},
-				{
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "s2",
 					},
@@ -126,8 +193,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							{Basic: &resourceapi.BasicDevice{}},
 						},
 					},
-				},
-				{ObjectMeta: metav1.ObjectMeta{Name: "no-change"}},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "no-change"}})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -153,43 +220,48 @@ func TestListPatchedResourceSlices(t *testing.T) {
 				{ObjectMeta: metav1.ObjectMeta{Name: "no-change"}},
 			},
 			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
-				if assert.Len(t, events, 5) {
-					assert.Equal(t, handlerEventAdd, events[0].event)
-					assert.Equal(t, "s1", events[0].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventAdd, events[1].event)
-					assert.Equal(t, "s2", events[1].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventAdd, events[2].event)
-					assert.Equal(t, "no-change", events[2].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventUpdate, events[3].event)
-					assert.Equal(t, "s1", events[3].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventUpdate, events[4].event)
-					assert.Equal(t, "s2", events[4].newObj.(*resourceapi.ResourceSlice).Name)
+				if !assert.Len(t, events, 5) {
+					return
 				}
+				// The first events are adds.
+				assert.Equal(t, handlerEventUpdate, events[3].event)
+				assert.Equal(t, "s1", events[3].newObj.Name)
+				assert.Equal(t, "s1", events[3].oldObj.Name)
+				assert.Nil(t, events[3].oldObj.Spec.Devices)
+				assert.NotNil(t, events[3].newObj.Spec.Devices)
+				assert.Equal(t, handlerEventUpdate, events[4].event)
+				assert.Equal(t, "s2", events[4].newObj.Name)
+				assert.Equal(t, "s2", events[4].oldObj.Name)
+				assert.Nil(t, events[4].oldObj.Spec.Devices)
+				assert.NotNil(t, events[4].newObj.Spec.Devices)
 			},
 		},
 		"delete-slices": {
-			initialCachedSlices: []*resourceapi.ResourceSlice{
-				{ObjectMeta: metav1.ObjectMeta{Name: "s1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "s2"}},
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlice(&resourceapi.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "s1"}})
+				event.addResourceSlice(&resourceapi.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "s2"}})
+				event.addResourceSlice(&resourceapi.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "keep-me"}})
+				event.deleteResourceSlice("s1")
+				event.deleteResourceSlice("s2")
 			},
-			expectedPatchedSlices: []*resourceapi.ResourceSlice{},
+			expectedPatchedSlices: []*resourceapi.ResourceSlice{
+				{ObjectMeta: metav1.ObjectMeta{Name: "keep-me"}},
+			},
 			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
-				if assert.Len(t, events, 4) {
-					assert.Equal(t, handlerEventAdd, events[0].event)
-					assert.Equal(t, "s1", events[0].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventAdd, events[1].event)
-					assert.Equal(t, "s2", events[1].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventDelete, events[2].event)
-					assert.Equal(t, "s1", events[2].newObj.(*resourceapi.ResourceSlice).Name)
-					assert.Equal(t, handlerEventDelete, events[3].event)
-					assert.Equal(t, "s2", events[3].newObj.(*resourceapi.ResourceSlice).Name)
+				if !assert.Len(t, events, 5) {
+					return
 				}
+				// The first events are adds.
+				assert.Equal(t, handlerEventDelete, events[3].event)
+				assert.Equal(t, "s1", events[3].oldObj.Name)
+				assert.Equal(t, handlerEventDelete, events[4].event)
+				assert.Equal(t, "s2", events[4].oldObj.Name)
 			},
 		},
 		"admin-attributes-disabled": {
 			adminAttrsDisabled: true,
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlice(&resourceapi.ResourceSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "slice",
 					},
@@ -200,10 +272,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "all-slices",
 					},
@@ -224,7 +294,7 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -240,10 +310,17 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 1) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+			},
 		},
 		"patch-all-slices": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlice(&resourceapi.ResourceSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "slice",
 					},
@@ -254,10 +331,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "all-slices",
 					},
@@ -278,7 +353,7 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -305,32 +380,19 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 2) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+				assert.Equal(t, handlerEventUpdate, events[1].event)
+				assert.Equal(t, "slice", events[1].newObj.Name)
+			},
 		},
 		"merge-attributes": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "test.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{
-									Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-										"test.example.com/removeMe": {StringValue: ptr.To("slice")},
-										"removeMeToo":               {StringValue: ptr.To("slice")},
-										"test.example.com/keepMe":   {StringValue: ptr.To("slice")},
-										"keepMeToo":                 {StringValue: ptr.To("slice")},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "merge",
 					},
@@ -353,7 +415,27 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "test.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{
+									Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+										"test.example.com/removeMe": {StringValue: ptr.To("slice")},
+										"removeMeToo":               {StringValue: ptr.To("slice")},
+										"test.example.com/keepMe":   {StringValue: ptr.To("slice")},
+										"keepMeToo":                 {StringValue: ptr.To("slice")},
+									},
+								},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -375,38 +457,17 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 1) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+			},
 		},
 		"add-attribute-for-driver": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "test.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "wrong-driver",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "wrong.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "driver",
 					},
@@ -429,7 +490,33 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "test.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "wrong-driver",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "wrong.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -470,42 +557,19 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 2) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+				assert.Equal(t, handlerEventAdd, events[1].event)
+				assert.Equal(t, "wrong-driver", events[1].newObj.Name)
+			},
 		},
 		"add-attribute-for-pool": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Pool: resourceapi.ResourcePool{
-							Name: "pool",
-						},
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "wrong-pool",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Pool: resourceapi.ResourcePool{
-							Name: "other",
-						},
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "pool",
 					},
@@ -528,7 +592,37 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Pool: resourceapi.ResourcePool{
+							Name: "pool",
+						},
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "wrong-pool",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Pool: resourceapi.ResourcePool{
+							Name: "other",
+						},
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -573,32 +667,19 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 2) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+				assert.Equal(t, handlerEventAdd, events[1].event)
+				assert.Equal(t, "wrong-pool", events[1].newObj.Name)
+			},
 		},
 		"add-attribute-for-device": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Pool: resourceapi.ResourcePool{
-							Name: "pool",
-						},
-						Devices: []resourceapi.Device{
-							{
-								Name:  "device",
-								Basic: &resourceapi.BasicDevice{},
-							},
-							{
-								Name:  "wrong-device",
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "device",
 					},
@@ -621,7 +702,27 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Pool: resourceapi.ResourcePool{
+							Name: "pool",
+						},
+						Devices: []resourceapi.Device{
+							{
+								Name:  "device",
+								Basic: &resourceapi.BasicDevice{},
+							},
+							{
+								Name:  "wrong-device",
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -656,38 +757,17 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 1) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+			},
 		},
 		"add-attribute-for-selector": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "test.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "wrong-driver",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "wrong.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "selector",
 					},
@@ -716,7 +796,33 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "test.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "wrong-driver",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "wrong.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -757,25 +863,19 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 2) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+				assert.Equal(t, handlerEventAdd, events[1].event)
+				assert.Equal(t, "wrong-driver", events[1].newObj.Name)
+			},
 		},
 		"selector-does-not-match": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "test.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "selector",
 					},
@@ -814,7 +914,20 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "test.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -831,32 +944,17 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 1) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+			},
 		},
 		"runtime-CEL-errors-skip-devices": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "test.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-							{
-								Basic: &resourceapi.BasicDevice{
-									Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-										"deviceAttr": {BoolValue: ptr.To(true)},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "selector",
 					},
@@ -885,7 +983,27 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "test.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+							{
+								Basic: &resourceapi.BasicDevice{
+									Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+										"deviceAttr": {BoolValue: ptr.To(true)},
+									},
+								},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -923,6 +1041,13 @@ func TestListPatchedResourceSlices(t *testing.T) {
 				}
 				assert.Equal(t, "selector", events.Items[0].InvolvedObject.Name)
 				assert.Equal(t, "CELRuntimeError", events.Items[0].Reason)
+			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 1) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
 			},
 		},
 		// TODO: how to check errors?
@@ -964,8 +1089,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 		// 	matchErr: gomega.MatchError(gomega.ContainSubstring("CEL compile error")),
 		// },
 		"add-attribute-for-device-class": {
-			initialClasses: []*resourceapi.DeviceClass{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addDeviceClass(&resourceapi.DeviceClass{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "class.example.com",
 					},
@@ -978,38 +1103,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-			},
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "test.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "wrong-driver",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "wrong.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "device-class",
 					},
@@ -1032,7 +1127,33 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "test.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "wrong-driver",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "wrong.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -1073,10 +1194,19 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 2) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+				assert.Equal(t, handlerEventAdd, events[1].event)
+				assert.Equal(t, "wrong-driver", events[1].newObj.Name)
+			},
 		},
 		"filter-all-criteria": {
-			initialClasses: []*resourceapi.DeviceClass{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addDeviceClass(&resourceapi.DeviceClass{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "class.example.com",
 					},
@@ -1089,42 +1219,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-			},
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "test.example.com",
-						Pool: resourceapi.ResourcePool{
-							Name: "pool",
-						},
-						Devices: []resourceapi.Device{
-							{
-								Name:  "device",
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "wrong-driver",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Driver: "wrong.example.com",
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "all-criteria",
 					},
@@ -1157,7 +1253,37 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "test.example.com",
+						Pool: resourceapi.ResourcePool{
+							Name: "pool",
+						},
+						Devices: []resourceapi.Device{
+							{
+								Name:  "device",
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "wrong-driver",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Driver: "wrong.example.com",
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -1202,24 +1328,19 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 2) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+				assert.Equal(t, handlerEventAdd, events[1].event)
+				assert.Equal(t, "wrong-driver", events[1].newObj.Name)
+			},
 		},
 		"priority": {
-			initialSlices: []*resourceapi.ResourceSlice{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "slice",
-					},
-					Spec: resourceapi.ResourceSliceSpec{
-						Devices: []resourceapi.Device{
-							{
-								Basic: &resourceapi.BasicDevice{},
-							},
-						},
-					},
-				},
-			},
-			initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-				{
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "negative-priority",
 					},
@@ -1272,8 +1393,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "no-priority",
 					},
@@ -1318,8 +1439,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "low-priority",
 					},
@@ -1356,8 +1477,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "medium-priority-old",
 						CreationTimestamp: metav1.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
@@ -1387,8 +1508,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "medium-priority-new",
 						CreationTimestamp: metav1.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC),
@@ -1418,8 +1539,8 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
-				{
+				})
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "high-priority",
 					},
@@ -1440,7 +1561,19 @@ func TestListPatchedResourceSlices(t *testing.T) {
 							},
 						},
 					},
-				},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
 			},
 			expectedPatchedSlices: []*resourceapi.ResourceSlice{
 				{
@@ -1491,6 +1624,13 @@ func TestListPatchedResourceSlices(t *testing.T) {
 					},
 				},
 			},
+			expectHandlerEvents: func(t *testing.T, events []handlerEvent) {
+				if !assert.Len(t, events, 1) {
+					return
+				}
+				assert.Equal(t, handlerEventAdd, events[0].event)
+				assert.Equal(t, "slice", events[0].newObj.Name)
+			},
 		},
 	}
 
@@ -1498,83 +1638,40 @@ func TestListPatchedResourceSlices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, ctx := ktesting.NewTestContext(t)
 
-			inputObjects := make([]runtime.Object, 0, len(test.initialSlices)+len(test.initialClasses))
-			for _, obj := range test.initialSlices {
-				inputObjects = append(inputObjects, obj.DeepCopyObject())
-			}
-			for _, obj := range test.initialClasses {
-				inputObjects = append(inputObjects, obj.DeepCopyObject())
-			}
-			// Passing ResourceSlicePatches directly through here doesn't work
-			// because that ultimately results in an incorrect guess at the
-			// resource name based on the kind (adding "s" instead of "es"). The
-			// same happens even for the Create workaround with the
-			// managedFields-tracking client from NewClientset().
-			kubeClient := fake.NewSimpleClientset(inputObjects...)
-			for _, resourceSlicePatch := range test.initialPatches {
-				_, err := kubeClient.ResourceV1alpha3().ResourceSlicePatches().Create(ctx, resourceSlicePatch, metav1.CreateOptions{})
-				require.NoError(t, err)
-			}
+			kubeClient := fake.NewSimpleClientset()
 			informerFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, 10*time.Minute)
 
-			var handlerEventsMutex sync.Mutex
 			var handlerEvents []handlerEvent
 			handler := cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
-					handlerEventsMutex.Lock()
-					defer handlerEventsMutex.Unlock()
-					handlerEvents = append(handlerEvents, handlerEvent{event: handlerEventAdd, newObj: obj})
+					handlerEvents = append(handlerEvents, handlerEvent{event: handlerEventAdd, newObj: obj.(*resourceapi.ResourceSlice)})
 				},
 				UpdateFunc: func(oldObj, newObj interface{}) {
-					handlerEventsMutex.Lock()
-					defer handlerEventsMutex.Unlock()
-					handlerEvents = append(handlerEvents, handlerEvent{event: handlerEventUpdate, oldObj: oldObj, newObj: newObj})
+					handlerEvents = append(handlerEvents, handlerEvent{event: handlerEventUpdate, oldObj: oldObj.(*resourceapi.ResourceSlice), newObj: newObj.(*resourceapi.ResourceSlice)})
 				},
 				DeleteFunc: func(obj interface{}) {
-					handlerEventsMutex.Lock()
-					defer handlerEventsMutex.Unlock()
-					handlerEvents = append(handlerEvents, handlerEvent{event: handlerEventDelete, oldObj: obj})
+					handlerEvents = append(handlerEvents, handlerEvent{event: handlerEventDelete, oldObj: obj.(*resourceapi.ResourceSlice)})
 				},
 			}
 
 			opts := Options{
 				EnableAdminControlledAttributes: !test.adminAttrsDisabled,
+				KubeClient:                      kubeClient,
 			}
-			tracker := newTracker(informerFactory, opts)
-			initialObjs := make([]any, 0, len(test.initialCachedSlices))
-			for _, obj := range test.initialCachedSlices {
-				initialObjs = append(initialObjs, obj)
-			}
-			tracker.patchedResourceSlices.Replace(initialObjs, "")
-			err := tracker.start(ctx, kubeClient)
-			require.NoError(t, err, "unexpected tracker start error")
+			tracker := newTracker(ctx, informerFactory, opts)
+			tracker.AddEventHandler(handler)
 
-			handlerReg := tracker.AddEventHandler(handler)
-
-			informerStop := make(chan struct{})
-			informerFactory.Start(informerStop)
-			var unsynced []reflect.Type
-			for typ, isSynced := range informerFactory.WaitForCacheSync(informerStop) {
-				if !isSynced {
-					unsynced = append(unsynced, typ)
-				}
+			if test.inputEvents != nil {
+				test.inputEvents(inputEventGeneratorForTest(ctx, t, tracker))
 			}
-			require.Empty(t, unsynced, "informers failed to sync")
-			t.Cleanup(func() {
-				close(informerStop)
-				informerFactory.Shutdown()
-			})
-			assert.True(t, handlerReg.HasSynced())
 
 			expectHandlerEvents := test.expectHandlerEvents
 			if expectHandlerEvents == nil {
 				expectHandlerEvents = func(t *testing.T, events []handlerEvent) {
-					// assert.Empty(t, events)
+					assert.Empty(t, events)
 				}
 			}
-			handlerEventsMutex.Lock()
 			expectHandlerEvents(t, handlerEvents)
-			handlerEventsMutex.Unlock()
 
 			// Check ResourceSlices
 			patchedResourceSlices, err := tracker.ListPatchedResourceSlices()
