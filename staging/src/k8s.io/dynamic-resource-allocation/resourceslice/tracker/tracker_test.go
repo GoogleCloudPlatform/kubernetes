@@ -1685,7 +1685,7 @@ func TestListPatchedResourceSlices(t *testing.T) {
 			expectEvents := test.expectEvents
 			if expectEvents == nil {
 				expectEvents = func(t *assert.CollectT, events *v1.EventList) {
-					assert.Empty(t, events)
+					assert.Empty(t, events.Items)
 				}
 			}
 			// Events are generated asynchronously. While shutting down the event recorder will flush all
