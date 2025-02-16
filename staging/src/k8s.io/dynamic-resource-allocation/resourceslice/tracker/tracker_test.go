@@ -130,6 +130,7 @@ func TestListPatchedResourceSlices(t *testing.T) {
 		expectedPatchedSlices []*resourceapi.ResourceSlice
 		expectHandlerEvents   func(t *testing.T, events []handlerEvent)
 		expectEvents          func(t *assert.CollectT, events *v1.EventList)
+		expectUnhandledErrors func(t *testing.T, errs []error)
 	}{
 		"add-slices-no-patches": {
 			inputEvents: func(event inputEventGenerator) {
@@ -1050,44 +1051,47 @@ func TestListPatchedResourceSlices(t *testing.T) {
 				assert.Equal(t, "slice", events[0].newObj.Name)
 			},
 		},
-		// TODO: how to check errors?
-		// "invalid-CEL-expression-returns-error": {
-		// 	initialSlices: []*resourceapi.ResourceSlice{
-		// 		{
-		// 			ObjectMeta: metav1.ObjectMeta{
-		// 				Name: "slice",
-		// 			},
-		// 			Spec: resourceapi.ResourceSliceSpec{
-		// 				Devices: []resourceapi.Device{
-		// 					{
-		// 						Basic: &resourceapi.BasicDevice{},
-		// 					},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	initialPatches: []*resourcealphaapi.ResourceSlicePatch{
-		// 		{
-		// 			ObjectMeta: metav1.ObjectMeta{
-		// 				Name: "selector",
-		// 			},
-		// 			Spec: resourcealphaapi.ResourceSlicePatchSpec{
-		// 				Devices: resourcealphaapi.DevicePatch{
-		// 					Filter: &resourcealphaapi.DevicePatchFilter{
-		// 						Selectors: []resourcealphaapi.DeviceSelector{
-		// 							{
-		// 								CEL: &resourcealphaapi.CELDeviceSelector{
-		// 									Expression: `invalid`,
-		// 								},
-		// 							},
-		// 						},
-		// 					},
-		// 				},
-		// 			},
-		// 		},
-		// 	},
-		// 	matchErr: gomega.MatchError(gomega.ContainSubstring("CEL compile error")),
-		// },
+		"invalid-CEL-expression-throws-error": {
+			inputEvents: func(event inputEventGenerator) {
+				event.addResourceSlicePatch(&resourcealphaapi.ResourceSlicePatch{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "selector",
+					},
+					Spec: resourcealphaapi.ResourceSlicePatchSpec{
+						Devices: resourcealphaapi.DevicePatch{
+							Filter: &resourcealphaapi.DevicePatchFilter{
+								Selectors: []resourcealphaapi.DeviceSelector{
+									{
+										CEL: &resourcealphaapi.CELDeviceSelector{
+											Expression: `invalid`,
+										},
+									},
+								},
+							},
+						},
+					},
+				})
+				event.addResourceSlice(&resourceapi.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "slice",
+					},
+					Spec: resourceapi.ResourceSliceSpec{
+						Devices: []resourceapi.Device{
+							{
+								Basic: &resourceapi.BasicDevice{},
+							},
+						},
+					},
+				})
+			},
+			expectedPatchedSlices: []*resourceapi.ResourceSlice{},
+			expectUnhandledErrors: func(t *testing.T, errs []error) {
+				if !assert.Len(t, errs, 1) {
+					return
+				}
+				assert.ErrorContains(t, errs[0], "CEL compile error")
+			},
+		},
 		"add-attribute-for-device-class": {
 			inputEvents: func(event inputEventGenerator) {
 				event.addDeviceClass(&resourceapi.DeviceClass{
@@ -1659,6 +1663,10 @@ func TestListPatchedResourceSlices(t *testing.T) {
 				KubeClient:                      kubeClient,
 			}
 			tracker := newTracker(ctx, informerFactory, opts)
+			var unhandledErrors []error
+			tracker.handleError = func(_ context.Context, err error, _ string, _ ...any) {
+				unhandledErrors = append(unhandledErrors, err)
+			}
 			tracker.AddEventHandler(handler)
 
 			if test.inputEvents != nil {
@@ -1672,6 +1680,14 @@ func TestListPatchedResourceSlices(t *testing.T) {
 				}
 			}
 			expectHandlerEvents(t, handlerEvents)
+
+			expectUnhandledErrors := test.expectUnhandledErrors
+			if expectUnhandledErrors == nil {
+				expectUnhandledErrors = func(t *testing.T, errs []error) {
+					assert.Empty(t, errs)
+				}
+			}
+			expectUnhandledErrors(t, unhandledErrors)
 
 			// Check ResourceSlices
 			patchedResourceSlices, err := tracker.ListPatchedResourceSlices()

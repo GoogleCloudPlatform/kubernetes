@@ -18,6 +18,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -52,6 +53,7 @@ type Tracker struct {
 	celCache              *cel.Cache
 	patchedResourceSlices cache.Store
 	recorder              record.EventRecorder
+	handleError           func(context.Context, error, string, ...any)
 
 	// Synchronizes updates to these fields related to event handlers.
 	rwMutex sync.RWMutex
@@ -107,6 +109,7 @@ func newTracker(ctx context.Context, informerFactory informers.SharedInformerFac
 		deviceClasses:                   informerFactory.Resource().V1beta1().DeviceClasses().Informer(),
 		celCache:                        cel.NewCache(10), // TODO: share cache with scheduler
 		patchedResourceSlices:           cache.NewStore(cache.MetaNamespaceKeyFunc),
+		handleError:                     utilruntime.HandleErrorWithContext,
 	}
 	t.handlerRegistration = handlerRegistrationFunc(func() bool {
 		return t.resourceSlices.HasSynced() &&
@@ -387,9 +390,8 @@ func (t *Tracker) deviceClassDelete(ctx context.Context) func(obj any) {
 	}
 }
 
-func (t *Tracker) syncSlice(ctx context.Context, name string) error {
+func (t *Tracker) syncSlice(ctx context.Context, name string) {
 	defer t.emitEvents()
-	// TODO: handle errors
 
 	logger := klog.FromContext(ctx)
 	logger = klog.LoggerWithValues(logger, "sliceName", name)
@@ -397,23 +399,27 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) error {
 
 	obj, sliceExists, err := t.resourceSlices.GetIndexer().GetByKey(name)
 	if err != nil {
-		return err
+		t.handleError(ctx, err, "failed to lookup existing resource slice")
+		return
 	}
 	oldPatchedObj, _, err := t.patchedResourceSlices.GetByKey(name)
 	if err != nil {
-		return err
+		t.handleError(ctx, err, "failed to lookup cached patched resource slice")
+		return
 	}
 	if !sliceExists {
 		err := t.patchedResourceSlices.Delete(oldPatchedObj)
 		if err != nil {
-			return fmt.Errorf("delete slice %s: %w", name, err)
+			t.handleError(ctx, err, "failed to delete cached patched resource slice")
+			return
 		}
 		t.pushEvent(oldPatchedObj, nil)
-		return nil
+		return
 	}
 	slice, ok := obj.(*resourceapi.ResourceSlice)
 	if !ok {
-		return fmt.Errorf("expected type to be %T, got %T", (*resourceapi.ResourceSlice)(nil), obj)
+		t.handleError(ctx, errors.New("invalid type in resource slice cache"), fmt.Sprintf("expected type to be %T, got %T", (*resourceapi.ResourceSlice)(nil), obj))
+		return
 	}
 	patchedSlice := slice.DeepCopy()
 
@@ -443,7 +449,8 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) error {
 			if filter.DeviceClassName != nil {
 				classObj, exists, err := t.deviceClasses.GetIndexer().GetByKey(*filter.DeviceClassName)
 				if err != nil {
-					return err
+					t.handleError(ctx, err, "failed to get device class", "deviceClassName", *filter.DeviceClassName)
+					return
 				}
 				if !exists {
 					continue
@@ -486,7 +493,9 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) error {
 					// the "stored expression" mechanism prevents that, but
 					// this code here might be more than one release older
 					// than the cluster it runs in.
-					return fmt.Errorf("class %s: selector #%d: CEL compile error: %w", *filter.DeviceClassName, i, expr.Error)
+					err := fmt.Errorf("class %s: selector #%d: CEL compile error: %w", *filter.DeviceClassName, i, expr.Error)
+					t.handleError(ctx, err, "failed to compile CEL")
+					return
 				}
 				match, _, err := expr.DeviceMatches(ctx, cel.Device{Driver: patchedSlice.Spec.Driver, Attributes: deviceAttributes, Capacity: deviceCapacity})
 				// TODO: scheduler logs a lot more info about CEL expression results
@@ -505,7 +514,9 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) error {
 					// the "stored expression" mechanism prevents that, but
 					// this code here might be more than one release older
 					// than the cluster it runs in.
-					return fmt.Errorf("patch %s: selector #%d: CEL compile error: %w", patch.Name, i, expr.Error)
+					err := fmt.Errorf("patch %s: selector #%d: CEL compile error: %w", patch.Name, i, expr.Error)
+					t.handleError(ctx, err, "failed to compile CEL")
+					return
 				}
 				match, _, err := expr.DeviceMatches(ctx, cel.Device{Driver: patchedSlice.Spec.Driver, Attributes: deviceAttributes, Capacity: deviceCapacity})
 				if err != nil {
@@ -563,12 +574,13 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) error {
 
 	err = t.patchedResourceSlices.Add(patchedSlice)
 	if err != nil {
-		return err
+		t.handleError(ctx, err, "failed to add patched resource slice to cache")
+		return
 	}
 	if !apiequality.Semantic.DeepEqual(oldPatchedObj, patchedSlice) {
 		t.pushEvent(oldPatchedObj, patchedSlice)
 	}
-	return nil
+	return
 }
 
 func typedSlice[T any](objs []any) []T {
