@@ -30,7 +30,7 @@ type TestRuntimeCache struct {
 func (r *TestRuntimeCache) UpdateCacheWithLock() error {
 	r.Lock()
 	defer r.Unlock()
-	return r.updateCache(context.Background())
+	return r.updateCache(context.TODO())
 }
 
 // GetCachedPods returns the cached pods.
