@@ -59,7 +59,7 @@ func TestForceUpdateIfOlder(t *testing.T) {
 	// Cache old pods.
 	oldpods := []*ctest.FakePod{{Pod: &Pod{ID: "1111"}}}
 	runtime.PodList = oldpods
-	cache.UpdateCacheWithLock()
+	cache.UpdateCacheWithLock(tCtx)
 
 	// Update the runtime to new pods.
 	newpods := []*ctest.FakePod{{Pod: &Pod{ID: "1111"}}, {Pod: &Pod{ID: "2222"}}, {Pod: &Pod{ID: "3333"}}}
