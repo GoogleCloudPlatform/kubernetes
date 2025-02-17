@@ -480,8 +480,7 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) {
 
 			var deviceAttributes map[resourceapi.QualifiedName]resourceapi.DeviceAttribute
 			var deviceCapacity map[resourceapi.QualifiedName]resourceapi.DeviceCapacity
-			switch {
-			case device.Basic != nil:
+			if device.Basic != nil {
 				deviceAttributes = device.Basic.Attributes
 				deviceCapacity = device.Basic.Capacity
 			}
@@ -563,8 +562,7 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) {
 					newCaps = nil
 				}
 
-				switch {
-				case device.Basic != nil:
+				if device.Basic != nil {
 					patchedSlice.Spec.Devices[dIndex].Basic.Attributes = newAttrs
 					patchedSlice.Spec.Devices[dIndex].Basic.Capacity = newCaps
 				}
@@ -580,7 +578,6 @@ func (t *Tracker) syncSlice(ctx context.Context, name string) {
 	if !apiequality.Semantic.DeepEqual(oldPatchedObj, patchedSlice) {
 		t.pushEvent(oldPatchedObj, patchedSlice)
 	}
-	return
 }
 
 func typedSlice[T any](objs []any) []T {
