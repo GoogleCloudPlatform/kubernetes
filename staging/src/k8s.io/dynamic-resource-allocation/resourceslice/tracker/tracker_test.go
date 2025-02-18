@@ -20,9 +20,11 @@ import (
 	stdcmp "cmp"
 	"context"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
@@ -35,6 +37,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2/ktesting"
+	_ "k8s.io/klog/v2/ktesting/init"
 	"k8s.io/utils/ptr"
 )
 
@@ -1717,6 +1720,265 @@ func TestListPatchedResourceSlices(t *testing.T) {
 				10*time.Millisecond,
 				"did not observe expected events",
 			)
+		})
+	}
+}
+
+func BenchmarkEventHandlers(b *testing.B) {
+	benchmarks := map[string]struct {
+		resourceSlices []*resourceapi.ResourceSlice
+		patches        []*resourcealphaapi.ResourceSlicePatch
+		loop           func(ctx context.Context, b *testing.B, tracker *Tracker, resourceSlices []*resourceapi.ResourceSlice, patches []*resourcealphaapi.ResourceSlicePatch, i int)
+	}{
+		"resource-slice-add-no-patches": {
+			resourceSlices: func() []*resourceapi.ResourceSlice {
+				resourceSlices := make([]*resourceapi.ResourceSlice, 1000)
+				for i := range resourceSlices {
+					resourceSlices[i] = &resourceapi.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "slice-" + strconv.Itoa(i),
+						},
+						Spec: resourceapi.ResourceSliceSpec{
+							Devices: slices.Repeat([]resourceapi.Device{{Basic: &resourceapi.BasicDevice{}}}, 64),
+						},
+					}
+				}
+				return resourceSlices
+			}(),
+			loop: func(ctx context.Context, b *testing.B, tracker *Tracker, resourceSlices []*resourceapi.ResourceSlice, patches []*resourcealphaapi.ResourceSlicePatch, i int) {
+				tracker.resourceSliceAdd(ctx)(resourceSlices[i%len(resourceSlices)])
+			},
+		},
+		"one-patch-to-many-slices-add-patch": {
+			resourceSlices: func() []*resourceapi.ResourceSlice {
+				resourceSlices := make([]*resourceapi.ResourceSlice, 500)
+				for i := range resourceSlices {
+					resourceSlices[i] = &resourceapi.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "slice-" + strconv.Itoa(i),
+						},
+						Spec: resourceapi.ResourceSliceSpec{
+							Devices: slices.Repeat([]resourceapi.Device{{Basic: &resourceapi.BasicDevice{}}}, 64),
+						},
+					}
+				}
+				return resourceSlices
+			}(),
+			patches: []*resourcealphaapi.ResourceSlicePatch{
+				&resourcealphaapi.ResourceSlicePatch{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "patch",
+					},
+					Spec: resourcealphaapi.ResourceSlicePatchSpec{
+						Devices: resourcealphaapi.DevicePatch{
+							Filter: nil, // all slices
+							Attributes: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.NullableDeviceAttribute{
+								"dra.example.com/bench": resourcealphaapi.NullableDeviceAttribute{
+									DeviceAttribute: resourcealphaapi.DeviceAttribute{
+										BoolValue: ptr.To(true),
+									},
+								},
+							},
+							Capacity: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.DeviceCapacity{
+								"dra.example.com/bench": resourcealphaapi.DeviceCapacity{
+									Value: resource.MustParse("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+			loop: func(ctx context.Context, b *testing.B, tracker *Tracker, resourceSlices []*resourceapi.ResourceSlice, patches []*resourcealphaapi.ResourceSlicePatch, i int) {
+				tracker.resourceSlicePatchAdd(ctx)(patches[i%len(patches)])
+			},
+		},
+		"one-patch-to-many-slices-add-slice": {
+			resourceSlices: func() []*resourceapi.ResourceSlice {
+				resourceSlices := make([]*resourceapi.ResourceSlice, 500)
+				for i := range resourceSlices {
+					resourceSlices[i] = &resourceapi.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "slice-" + strconv.Itoa(i),
+						},
+						Spec: resourceapi.ResourceSliceSpec{
+							Devices: slices.Repeat([]resourceapi.Device{{Basic: &resourceapi.BasicDevice{}}}, 64),
+						},
+					}
+				}
+				return resourceSlices
+			}(),
+			patches: []*resourcealphaapi.ResourceSlicePatch{
+				&resourcealphaapi.ResourceSlicePatch{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "patch",
+					},
+					Spec: resourcealphaapi.ResourceSlicePatchSpec{
+						Devices: resourcealphaapi.DevicePatch{
+							Filter: nil, // all slices
+							Attributes: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.NullableDeviceAttribute{
+								"dra.example.com/bench": resourcealphaapi.NullableDeviceAttribute{
+									DeviceAttribute: resourcealphaapi.DeviceAttribute{
+										BoolValue: ptr.To(true),
+									},
+								},
+							},
+							Capacity: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.DeviceCapacity{
+								"dra.example.com/bench": resourcealphaapi.DeviceCapacity{
+									Value: resource.MustParse("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+			loop: func(ctx context.Context, b *testing.B, tracker *Tracker, resourceSlices []*resourceapi.ResourceSlice, patches []*resourcealphaapi.ResourceSlicePatch, i int) {
+				tracker.resourceSliceAdd(ctx)(resourceSlices[i%len(resourceSlices)])
+			},
+		},
+		"one-patched-device-among-many-slices-add-patch": {
+			resourceSlices: func() []*resourceapi.ResourceSlice {
+				resourceSlices := make([]*resourceapi.ResourceSlice, 500)
+				for i := range resourceSlices {
+					resourceSlices[i] = &resourceapi.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "slice-" + strconv.Itoa(i),
+						},
+						Spec: resourceapi.ResourceSliceSpec{
+							Pool: resourceapi.ResourcePool{
+								Name: "pool-" + strconv.Itoa(i),
+							},
+							Devices: func() []resourceapi.Device {
+								nDevices := 64
+								devices := slices.Repeat([]resourceapi.Device{{Basic: &resourceapi.BasicDevice{}}}, nDevices)
+								devices[nDevices/2].Name = "patchme"
+								return devices
+							}(),
+						},
+					}
+				}
+				return resourceSlices
+			}(),
+			patches: []*resourcealphaapi.ResourceSlicePatch{
+				&resourcealphaapi.ResourceSlicePatch{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "patch",
+					},
+					Spec: resourcealphaapi.ResourceSlicePatchSpec{
+						Devices: resourcealphaapi.DevicePatch{
+							Filter: &resourcealphaapi.DevicePatchFilter{
+								Pool:   ptr.To("pool-250"),
+								Device: ptr.To("patchme"),
+							},
+							Attributes: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.NullableDeviceAttribute{
+								"dra.example.com/bench": resourcealphaapi.NullableDeviceAttribute{
+									DeviceAttribute: resourcealphaapi.DeviceAttribute{
+										BoolValue: ptr.To(true),
+									},
+								},
+							},
+							Capacity: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.DeviceCapacity{
+								"dra.example.com/bench": resourcealphaapi.DeviceCapacity{
+									Value: resource.MustParse("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+			loop: func(ctx context.Context, b *testing.B, tracker *Tracker, resourceSlices []*resourceapi.ResourceSlice, patches []*resourcealphaapi.ResourceSlicePatch, i int) {
+				tracker.resourceSlicePatchAdd(ctx)(patches[i%len(patches)])
+			},
+		},
+		"one-patched-device-among-many-slices-add-slice": {
+			resourceSlices: func() []*resourceapi.ResourceSlice {
+				resourceSlices := make([]*resourceapi.ResourceSlice, 500)
+				for i := range resourceSlices {
+					resourceSlices[i] = &resourceapi.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "slice-" + strconv.Itoa(i),
+						},
+						Spec: resourceapi.ResourceSliceSpec{
+							Pool: resourceapi.ResourcePool{
+								Name: "pool-" + strconv.Itoa(i),
+							},
+							Devices: func() []resourceapi.Device {
+								nDevices := 64
+								devices := slices.Repeat([]resourceapi.Device{{Basic: &resourceapi.BasicDevice{}}}, nDevices)
+								devices[nDevices/2].Name = "patchme"
+								return devices
+							}(),
+						},
+					}
+				}
+				return resourceSlices
+			}(),
+			patches: []*resourcealphaapi.ResourceSlicePatch{
+				&resourcealphaapi.ResourceSlicePatch{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "patch",
+					},
+					Spec: resourcealphaapi.ResourceSlicePatchSpec{
+						Devices: resourcealphaapi.DevicePatch{
+							Filter: &resourcealphaapi.DevicePatchFilter{
+								Pool:   ptr.To("pool-250"),
+								Device: ptr.To("patchme"),
+							},
+							Attributes: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.NullableDeviceAttribute{
+								"dra.example.com/bench": resourcealphaapi.NullableDeviceAttribute{
+									DeviceAttribute: resourcealphaapi.DeviceAttribute{
+										BoolValue: ptr.To(true),
+									},
+								},
+							},
+							Capacity: map[resourcealphaapi.FullyQualifiedName]resourcealphaapi.DeviceCapacity{
+								"dra.example.com/bench": resourcealphaapi.DeviceCapacity{
+									Value: resource.MustParse("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+			loop: func(ctx context.Context, b *testing.B, tracker *Tracker, resourceSlices []*resourceapi.ResourceSlice, patches []*resourcealphaapi.ResourceSlicePatch, i int) {
+				tracker.resourceSliceAdd(ctx)(resourceSlices[250]) // the slice affected by the patch
+			},
+		},
+	}
+
+	newBenchTracker := func(ctx context.Context) *Tracker {
+		kubeClient := fake.NewSimpleClientset()
+		informerFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, 10*time.Minute)
+		opts := Options{
+			EnableAdminControlledAttributes: true,
+			KubeClient:                      kubeClient,
+		}
+		tracker := newTracker(ctx, informerFactory, opts)
+		tracker.handleError = func(_ context.Context, err error, _ string, _ ...any) {
+			b.Error("unexpected unhandled error:", err)
+		}
+		return tracker
+	}
+
+	for name, benchmark := range benchmarks {
+		b.Run(name, func(b *testing.B) {
+			logger, ctx := ktesting.NewTestContext(b)
+			ctx = logr.NewContext(ctx, logger.V(2))
+			tracker := newBenchTracker(ctx)
+
+			for _, slice := range benchmark.resourceSlices {
+				err := tracker.resourceSlices.GetIndexer().Add(slice)
+				require.NoError(b, err)
+			}
+
+			for _, patch := range benchmark.patches {
+				err := tracker.resourceSlicePatches.GetIndexer().Add(patch)
+				require.NoError(b, err)
+			}
+
+			b.ResetTimer()
+			for i := range b.N {
+				benchmark.loop(ctx, b, tracker, benchmark.resourceSlices, benchmark.patches, i)
+			}
 		})
 	}
 }
