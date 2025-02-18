@@ -1340,7 +1340,7 @@ func TestNodeInclusionPolicyEnablementInCreating(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.NodeInclusionPolicyInPodTopologySpread, tc.enableNodeInclusionPolicy)
 
-			pod := podtest.MakePod("foo")
+			pod := podtest.MakePod("foo", podtest.SetGeneration(1))
 			wantPod := pod.DeepCopy()
 			pod.Spec.TopologySpreadConstraints = append(pod.Spec.TopologySpreadConstraints, tc.topologySpreadConstraints...)
 

@@ -5583,6 +5583,7 @@ func ValidatePodResize(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 	fldPath := field.NewPath("metadata")
 	// metadata.generation is the only metadata field allowed to change, since this is set by
 	// the system and expected to be incremented upon updates to container resources.
+	// +k8s:verify-mutation:reason=clone
 	oldPodCopy := oldPod.DeepCopy()
 	oldPodCopy.Generation = newPod.Generation
 	allErrs := ValidateImmutableField(&newPod.ObjectMeta, &oldPodCopy.ObjectMeta, fldPath)
