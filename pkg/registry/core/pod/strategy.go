@@ -92,6 +92,8 @@ func (podStrategy) PrepareForCreate(ctx context.Context, obj runtime.Object) {
 		QOSClass: qos.GetPodQOS(pod),
 	}
 
+	podutil.DropDisabledPodFields(pod, nil)
+
 	applySchedulingGatedCondition(pod)
 	mutatePodAffinity(pod)
 	applyAppArmorVersionSkew(ctx, pod)
@@ -981,7 +983,7 @@ func apparmorFieldForAnnotation(annotation string) *api.AppArmorProfile {
 // bumpGenerationForPodSpecUpdate bumps metadata.generation if needed for any updates
 // to the podspec.
 func bumpGenerationForPodSpecUpdate(newPod, oldPod *api.Pod) {
-	if newPod.Generation == 0 || !apiequality.Semantic.DeepEqual(newPod.Spec, oldPod.Spec) {
+	if !apiequality.Semantic.DeepEqual(newPod.Spec, oldPod.Spec) {
 		newPod.Generation++
 	}
 }
