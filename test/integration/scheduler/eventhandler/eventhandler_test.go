@@ -211,7 +211,7 @@ func TestUpdateNominatedNodeName(t *testing.T) {
 			t.Run(fmt.Sprintf("%s, with queuehint(%v)", tt.name, qHintEnabled), func(t *testing.T) {
 				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SchedulerQueueingHints, qHintEnabled)
 
-				testCtx, teardown := schedulerutils.InitTestSchedulerForFrameworkTest(t, testContext, 0,
+				testCtx, teardown := schedulerutils.InitTestSchedulerForFrameworkTest(t, testContext, 0, true,
 					scheduler.WithClock(fakeClock),
 					// UpdateFunc needs to be called when the nominated pod is still in the backoff queue, thus small, but non 0 value.
 					scheduler.WithPodInitialBackoffSeconds(int64(testBackoff.Seconds())),
