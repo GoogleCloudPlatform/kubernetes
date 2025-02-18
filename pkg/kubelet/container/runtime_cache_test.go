@@ -59,19 +59,25 @@ func TestForceUpdateIfOlder(t *testing.T) {
 	// Cache old pods.
 	oldpods := []*ctest.FakePod{{Pod: &Pod{ID: "1111"}}}
 	runtime.PodList = oldpods
-	cache.UpdateCacheWithLock(tCtx)
+	if err := cache.UpdateCacheWithLock(tCtx); err != nil {
+		t.Errorf("unexpected error %v", err)
+	}
 
 	// Update the runtime to new pods.
 	newpods := []*ctest.FakePod{{Pod: &Pod{ID: "1111"}}, {Pod: &Pod{ID: "2222"}}, {Pod: &Pod{ID: "3333"}}}
 	runtime.PodList = newpods
 
 	// An older timestamp should not force an update.
-	cache.ForceUpdateIfOlder(tCtx, time.Now().Add(-20*time.Minute))
+	if err := cache.ForceUpdateIfOlder(tCtx, time.Now().Add(-20*time.Minute)); err != nil {
+		t.Errorf("unexpected error %v", err)
+	}
 	actual := cache.GetCachedPods()
 	comparePods(t, oldpods, actual)
 
 	// A newer timestamp should force an update.
-	cache.ForceUpdateIfOlder(tCtx, time.Now().Add(20*time.Second))
+	if err := cache.ForceUpdateIfOlder(tCtx, time.Now().Add(20*time.Second)); err != nil {
+
+	}
 	actual = cache.GetCachedPods()
 	comparePods(t, newpods, actual)
 }
