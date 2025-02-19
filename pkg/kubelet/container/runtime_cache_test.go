@@ -76,7 +76,7 @@ func TestForceUpdateIfOlder(t *testing.T) {
 
 	// A newer timestamp should force an update.
 	if err := cache.ForceUpdateIfOlder(tCtx, time.Now().Add(20*time.Second)); err != nil {
-
+		t.Errorf("unexpected error %v", err)
 	}
 	actual = cache.GetCachedPods()
 	comparePods(t, newpods, actual)
