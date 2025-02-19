@@ -151,6 +151,9 @@ type watchCache struct {
 	// Requests progress notification if there are requests waiting for watch
 	// to be fresh
 	waitingUntilFresh *conditionalProgressRequester
+
+	// Stores previous snapshots of orderedLister to allow serving requests from previous revisions.
+	orderedListerSnapshots *storeSnapshotter
 }
 
 func newWatchCache(
@@ -164,23 +167,24 @@ func newWatchCache(
 	groupResource schema.GroupResource,
 	progressRequester *conditionalProgressRequester) *watchCache {
 	wc := &watchCache{
-		capacity:            defaultLowerBoundCapacity,
-		keyFunc:             keyFunc,
-		getAttrsFunc:        getAttrsFunc,
-		cache:               make([]*watchCacheEvent, defaultLowerBoundCapacity),
-		lowerBoundCapacity:  defaultLowerBoundCapacity,
-		upperBoundCapacity:  defaultUpperBoundCapacity,
-		startIndex:          0,
-		endIndex:            0,
-		store:               newStoreIndexer(indexers),
-		resourceVersion:     0,
-		listResourceVersion: 0,
-		eventHandler:        eventHandler,
-		clock:               clock,
-		eventFreshDuration:  eventFreshDuration,
-		versioner:           versioner,
-		groupResource:       groupResource,
-		waitingUntilFresh:   progressRequester,
+		capacity:               defaultLowerBoundCapacity,
+		keyFunc:                keyFunc,
+		getAttrsFunc:           getAttrsFunc,
+		cache:                  make([]*watchCacheEvent, defaultLowerBoundCapacity),
+		lowerBoundCapacity:     defaultLowerBoundCapacity,
+		upperBoundCapacity:     defaultUpperBoundCapacity,
+		startIndex:             0,
+		endIndex:               0,
+		store:                  newStoreIndexer(indexers),
+		resourceVersion:        0,
+		listResourceVersion:    0,
+		eventHandler:           eventHandler,
+		clock:                  clock,
+		eventFreshDuration:     eventFreshDuration,
+		versioner:              versioner,
+		groupResource:          groupResource,
+		waitingUntilFresh:      progressRequester,
+		orderedListerSnapshots: newStoreSnapshotter(),
 	}
 	metrics.WatchCacheCapacity.WithLabelValues(groupResource.String()).Set(float64(wc.capacity))
 	wc.cond = sync.NewCond(wc.RLocker())
@@ -286,7 +290,16 @@ func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, upd
 		w.resourceVersion = resourceVersion
 		defer w.cond.Broadcast()
 
-		return updateFunc(elem)
+		err := updateFunc(elem)
+		if err != nil {
+			return err
+		}
+		if utilfeature.DefaultFeatureGate.Enabled(features.ListFromCacheSnapshot) {
+			if orderedLister, ordered := w.store.(orderedLister); ordered {
+				w.orderedListerSnapshots.Add(w.resourceVersion, orderedLister.Clone())
+			}
+		}
+		return err
 	}(); err != nil {
 		return err
 	}
@@ -306,6 +319,10 @@ func (w *watchCache) processEvent(event watch.Event, resourceVersion uint64, upd
 func (w *watchCache) updateCache(event *watchCacheEvent) {
 	w.resizeCacheLocked(event.RecordTime)
 	if w.isCacheFullLocked() {
+		if utilfeature.DefaultFeatureGate.Enabled(features.ListFromCacheSnapshot) {
+			oldestRV := w.cache[w.startIndex%w.capacity].ResourceVersion
+			w.orderedListerSnapshots.RemoveLessOrEqual(oldestRV)
+		}
 		// Cache is full - remove the oldest element.
 		w.startIndex++
 		w.removedEventSinceRelist = true
@@ -600,6 +617,12 @@ func (w *watchCache) Replace(objs []interface{}, resourceVersion string) error {
 
 	if err := w.store.Replace(toReplace, resourceVersion); err != nil {
 		return err
+	}
+	if utilfeature.DefaultFeatureGate.Enabled(features.ListFromCacheSnapshot) {
+		w.orderedListerSnapshots.Reset()
+		if orderedLister, ordered := w.store.(orderedLister); ordered {
+			w.orderedListerSnapshots.Add(version, orderedLister)
+		}
 	}
 	w.listResourceVersion = version
 	w.resourceVersion = version

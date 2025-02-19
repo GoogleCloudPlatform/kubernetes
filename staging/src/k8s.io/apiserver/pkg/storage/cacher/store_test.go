@@ -175,3 +175,79 @@ func testStoreIndexers() *cache.Indexers {
 	indexers["by_val"] = testStoreIndexFunc
 	return &indexers
 }
+
+func TestStoreSnapshotter(t *testing.T) {
+	cache := newStoreSnapshotter()
+	cache.Add(10, fakeOrderedLister{rv: 10})
+	cache.Add(20, fakeOrderedLister{rv: 20})
+	cache.Add(30, fakeOrderedLister{rv: 30})
+	cache.Add(40, fakeOrderedLister{rv: 40})
+	assert.Equal(t, 4, cache.snapshots.Len())
+
+	t.Log("No snapshot from before first RV")
+	assert.False(t, cache.HasLessOrEqual(9))
+	_, found := cache.GetLessOrEqual(9)
+	assert.False(t, found)
+
+	t.Log("Get snapshot from first RV")
+	assert.True(t, cache.HasLessOrEqual(10))
+	snapshot, found := cache.GetLessOrEqual(10)
+	assert.True(t, found)
+	assert.Equal(t, 10, snapshot.(fakeOrderedLister).rv)
+
+	t.Log("Get first snapshot by larger RV")
+	assert.True(t, cache.HasLessOrEqual(11))
+	snapshot, found = cache.GetLessOrEqual(11)
+	assert.True(t, found)
+	assert.Equal(t, 10, snapshot.(fakeOrderedLister).rv)
+
+	t.Log("Get second snapshot by larger RV")
+	assert.True(t, cache.HasLessOrEqual(22))
+	snapshot, found = cache.GetLessOrEqual(22)
+	assert.True(t, found)
+	assert.Equal(t, 20, snapshot.(fakeOrderedLister).rv)
+
+	t.Log("Get third snapshot for future revision")
+	assert.True(t, cache.HasLessOrEqual(100))
+	snapshot, found = cache.GetLessOrEqual(100)
+	assert.True(t, found)
+	assert.Equal(t, 40, snapshot.(fakeOrderedLister).rv)
+
+	t.Log("Remove snapshot up to RV")
+	cache.RemoveLessOrEqual(20)
+
+	assert.Equal(t, 2, cache.snapshots.Len())
+	assert.False(t, cache.HasLessOrEqual(10))
+	_, found = cache.GetLessOrEqual(10)
+	assert.False(t, found)
+
+	assert.False(t, cache.HasLessOrEqual(20))
+	_, found = cache.GetLessOrEqual(20)
+	assert.False(t, found)
+
+	assert.True(t, cache.HasLessOrEqual(30))
+	snapshot, found = cache.GetLessOrEqual(30)
+	assert.True(t, found)
+	assert.Equal(t, 30, snapshot.(fakeOrderedLister).rv)
+
+	t.Log("Remove removing all RVs")
+	cache.Reset()
+	assert.Equal(t, 0, cache.snapshots.Len())
+	_, found = cache.GetLessOrEqual(30)
+	assert.False(t, found)
+	_, found = cache.GetLessOrEqual(40)
+	assert.False(t, found)
+}
+
+type fakeOrderedLister struct {
+	rv int
+}
+
+func (f fakeOrderedLister) Add(obj interface{}) error    { return nil }
+func (f fakeOrderedLister) Update(obj interface{}) error { return nil }
+func (f fakeOrderedLister) Delete(obj interface{}) error { return nil }
+func (f fakeOrderedLister) Clone() orderedLister         { return f }
+func (f fakeOrderedLister) ListPrefix(prefixKey, continueKey string, limit int) ([]interface{}, bool) {
+	return nil, false
+}
+func (f fakeOrderedLister) Count(prefixKey, continueKey string) int { return 0 }

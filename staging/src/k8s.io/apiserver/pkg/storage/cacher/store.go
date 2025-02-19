@@ -18,7 +18,9 @@ package cacher
 
 import (
 	"fmt"
+	"sync"
 
+	"github.com/google/btree"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -74,6 +76,20 @@ type storeIndexer interface {
 
 type orderedLister interface {
 	ListPrefix(prefix, continueKey string, limit int) (items []interface{}, hasMore bool)
+	Count(prefix, continueKey string) (count int)
+	Clone() orderedLister
+}
+
+func (si *threadedStoreIndexer) Count(prefix, continueKey string) (count int) {
+	si.lock.RLock()
+	defer si.lock.RUnlock()
+	return si.store.Count(prefix, continueKey)
+}
+
+func (si *threadedStoreIndexer) Clone() orderedLister {
+	si.lock.RLock()
+	defer si.lock.RUnlock()
+	return si.store.Clone()
 }
 
 func newStoreIndexer(indexers *cache.Indexers) storeIndexer {
@@ -130,4 +146,74 @@ func storeElementIndexers(indexers *cache.Indexers) cache.Indexers {
 		ret[indexName] = storeElementIndexFunc(indexFunc)
 	}
 	return ret
+}
+
+// storeSnapshotter caches snapshots of store created by cloning the store.
+type storeSnapshotter struct {
+	sync.RWMutex
+	snapshots *btree.BTreeG[rvSnapshot]
+}
+
+type rvSnapshot struct {
+	resourceVersion uint64
+	snapshot        orderedLister
+}
+
+func newStoreSnapshotter() *storeSnapshotter {
+	s := &storeSnapshotter{}
+	s.Reset()
+	return s
+}
+
+func (c *storeSnapshotter) Reset() {
+	c.snapshots = btree.NewG[rvSnapshot](btreeDegree, func(a, b rvSnapshot) bool {
+		return a.resourceVersion < b.resourceVersion
+	})
+}
+
+func (c *storeSnapshotter) GetLessOrEqual(rv uint64) (orderedLister, bool) {
+	c.RLock()
+	defer c.RUnlock()
+
+	var result *rvSnapshot
+	c.snapshots.DescendLessOrEqual(rvSnapshot{resourceVersion: rv}, func(rvs rvSnapshot) bool {
+		result = &rvs
+		return false
+	})
+	if result == nil {
+		return nil, false
+	}
+	return result.snapshot, true
+}
+
+func (c *storeSnapshotter) HasLessOrEqual(rv uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+
+	oldest, ok := c.snapshots.Min()
+	if !ok {
+		return false
+	}
+	return oldest.resourceVersion <= rv
+}
+
+func (c *storeSnapshotter) Add(rv uint64, indexer orderedLister) {
+	c.Lock()
+	defer c.Unlock()
+	c.snapshots.ReplaceOrInsert(rvSnapshot{resourceVersion: rv, snapshot: indexer})
+}
+
+func (c *storeSnapshotter) RemoveLessOrEqual(rv uint64) {
+	c.Lock()
+	defer c.Unlock()
+	for c.snapshots.Len() > 0 {
+		oldest, ok := c.snapshots.Min()
+		if !ok {
+			break
+		}
+		if rv < oldest.resourceVersion {
+			break
+		}
+		c.snapshots.DeleteMin()
+	}
 }

@@ -140,6 +140,12 @@ type btreeStore struct {
 	tree *btree.BTreeG[*storeElement]
 }
 
+func (s *btreeStore) Clone() orderedLister {
+	return &btreeStore{
+		tree: s.tree.Clone(),
+	}
+}
+
 func (s *btreeStore) Add(obj interface{}) error {
 	if obj == nil {
 		return fmt.Errorf("obj cannot be nil")
