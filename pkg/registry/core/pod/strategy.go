@@ -249,9 +249,12 @@ var EphemeralContainersStrategy = podEphemeralContainersStrategy{Strategy}
 
 // dropNonEphemeralContainerUpdates discards all changes except for pod.Spec.EphemeralContainers and certain metadata
 func dropNonEphemeralContainerUpdates(newPod, oldPod *api.Pod) *api.Pod {
-	pod := dropPodUpdates(newPod, oldPod)
-	pod.Spec.EphemeralContainers = newPod.Spec.EphemeralContainers
-	return pod
+	newEphemeralContainerSpec := newPod.Spec.EphemeralContainers
+	newPod.Spec = oldPod.Spec
+	newPod.Status = oldPod.Status
+	metav1.ResetObjectMetaForStatus(&newPod.ObjectMeta, &oldPod.ObjectMeta)
+	newPod.Spec.EphemeralContainers = newEphemeralContainerSpec
+	return newPod
 }
 
 func (podEphemeralContainersStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
@@ -292,10 +295,9 @@ var ResizeStrategy = podResizeStrategy{
 
 // dropNonResizeUpdates discards all changes except for pod.Spec.Containers[*].Resources, pod.Spec.InitContainers[*].Resources, ResizePolicy and certain metadata
 func dropNonResizeUpdates(newPod, oldPod *api.Pod) *api.Pod {
-	pod := dropPodUpdates(newPod, oldPod)
-
 	// Containers are not allowed to be re-ordered, but in case they were,
 	// we don't want to corrupt them here. It will get caught in validation.
+	pod := oldPod.DeepCopy()
 	oldCtrToIndex := make(map[string]int)
 	oldInitCtrToIndex := make(map[string]int)
 	for idx, ctr := range pod.Spec.Containers {
@@ -324,7 +326,13 @@ func dropNonResizeUpdates(newPod, oldPod *api.Pod) *api.Pod {
 			pod.Spec.InitContainers[idx].ResizePolicy = ctr.ResizePolicy
 		}
 	}
-	return pod
+
+	newPod.Spec = oldPod.Spec
+	newPod.Status = oldPod.Status
+	metav1.ResetObjectMetaForStatus(&newPod.ObjectMeta, &oldPod.ObjectMeta)
+	newPod.Spec.Containers = pod.Spec.Containers
+	newPod.Spec.InitContainers = pod.Spec.InitContainers
+	return newPod
 }
 
 func (podResizeStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object) {
@@ -355,14 +363,6 @@ func (p podResizeStrategy) GetResetFieldsFilter() map[fieldpath.APIVersion]field
 	return map[fieldpath.APIVersion]fieldpath.Filter{
 		"v1": p.resetFieldsFilter,
 	}
-}
-
-// dropPodUpdates drops any changes in the pod.
-func dropPodUpdates(newPod, oldPod *api.Pod) *api.Pod {
-	pod := oldPod.DeepCopy()
-	pod.ResourceVersion = newPod.ResourceVersion
-	pod.ManagedFields = newPod.ManagedFields
-	return pod
 }
 
 // GetAttrs returns labels and fields of a given object for filtering purposes.
