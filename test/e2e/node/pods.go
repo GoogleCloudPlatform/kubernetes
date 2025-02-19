@@ -424,11 +424,7 @@ var _ = SIGDescribe("Pods Extended", func() {
 		ginkgo.It("pod generation should start at 1 and increment per update", func(ctx context.Context) {
 			ginkgo.By("creating the pod")
 			podName := "pod-generation-" + string(uuid.NewUUID())
-			value := strconv.Itoa(time.Now().Nanosecond())
 			pod := e2epod.NewAgnhostPod(f.Namespace.Name, podName, nil, nil, nil)
-			pod.ObjectMeta.Labels = map[string]string{
-				"time": value,
-			}
 			pod.Spec.InitContainers = []v1.Container{{
 				Name:  "init-container",
 				Image: imageutils.GetE2EImage(imageutils.BusyBox),
@@ -436,14 +432,11 @@ var _ = SIGDescribe("Pods Extended", func() {
 
 			ginkgo.By("submitting the pod to kubernetes")
 			pod = podClient.CreateSync(ctx, pod)
+			gomega.Expect(pod.Generation).To(gomega.BeEquivalentTo(1))
 			ginkgo.DeferCleanup(func(ctx context.Context) error {
 				ginkgo.By("deleting the pod")
 				return podClient.Delete(ctx, pod.Name, metav1.DeleteOptions{})
 			})
-
-			ginkgo.By("setting up selector")
-			selector := labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
-			options := metav1.ListOptions{LabelSelector: selector.String()}
 
 			ginkgo.By("verifying pod generation bumps as expected")
 			tests := []struct {
@@ -452,7 +445,7 @@ var _ = SIGDescribe("Pods Extended", func() {
 				expectGenerationBump bool
 			}{
 				{
-					name:                 "verifying the new pod's generation is 1",
+					name:                 "empty update",
 					updateFn:             func(pod *v1.Pod) {},
 					expectGenerationBump: false,
 				},
@@ -518,13 +511,12 @@ var _ = SIGDescribe("Pods Extended", func() {
 			for _, test := range tests {
 				ginkgo.By(test.name)
 				podClient.Update(ctx, podName, test.updateFn)
-				pods, err := podClient.List(ctx, options)
+				pod, err := podClient.Get(ctx, podName, metav1.GetOptions{})
 				framework.ExpectNoError(err, "failed to query for pod")
-				gomega.Expect(pods.Items).To(gomega.HaveLen(1))
 				if test.expectGenerationBump {
 					expectedPodGeneration++
 				}
-				gomega.Expect(pods.Items[0].Generation).To(gomega.BeEquivalentTo(expectedPodGeneration))
+				gomega.Expect(pod.Generation).To(gomega.BeEquivalentTo(expectedPodGeneration))
 			}
 		})
 
