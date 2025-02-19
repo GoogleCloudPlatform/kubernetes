@@ -3229,7 +3229,7 @@ func TestPodGenerationPrepareForUpdate(t *testing.T) {
 				},
 				Spec: api.PodSpec{},
 			},
-			expectedGeneration: 1,
+			expectedGeneration: 0,
 		},
 	}
 
