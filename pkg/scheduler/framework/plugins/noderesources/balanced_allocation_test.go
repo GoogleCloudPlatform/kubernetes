@@ -119,13 +119,14 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 	}
 
 	tests := []struct {
-		pod          *v1.Pod
-		pods         []*v1.Pod
-		nodes        []*v1.Node
-		expectedList framework.NodeScoreList
-		name         string
-		args         config.NodeResourcesBalancedAllocationArgs
-		runPreScore  bool
+		pod                    *v1.Pod
+		pods                   []*v1.Pod
+		nodes                  []*v1.Node
+		expectedList           framework.NodeScoreList
+		name                   string
+		args                   config.NodeResourcesBalancedAllocationArgs
+		runPreScore            bool
+		wantPreScoreStatusCode framework.Code
 	}{
 		{
 			// Node1 scores (remaining resources) on 0-MaxNodeScore scale
@@ -136,12 +137,13 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 			// CPU Fraction: 0 / 4000 = 0 %
 			// Memory Fraction: 0 / 10000 = 0%
 			// Node2 Score: (1-0) * MaxNodeScore = MaxNodeScore
-			pod:          st.MakePod().Obj(),
-			nodes:        []*v1.Node{makeNode("node1", 4000, 10000, nil), makeNode("node2", 4000, 10000, nil)},
-			expectedList: []framework.NodeScore{{Name: "node1", Score: framework.MaxNodeScore}, {Name: "node2", Score: framework.MaxNodeScore}},
-			name:         "nothing scheduled, nothing requested",
-			args:         config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore:  true,
+			pod:                    st.MakePod().Obj(),
+			nodes:                  []*v1.Node{makeNode("node1", 4000, 10000, nil), makeNode("node2", 4000, 10000, nil)},
+			expectedList:           []framework.NodeScore{{Name: "node1", Score: framework.MaxNodeScore}, {Name: "node2", Score: framework.MaxNodeScore}},
+			name:                   "nothing scheduled, nothing requested",
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Skip,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -154,12 +156,13 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 			// Memory Fraction: 5000/10000 = 50%
 			// Node2 std: 0
 			// Node2 Score: (1-0) * MaxNodeScore = MaxNodeScore
-			pod:          &v1.Pod{Spec: cpuAndMemory},
-			nodes:        []*v1.Node{makeNode("node1", 4000, 10000, nil), makeNode("node2", 6000, 10000, nil)},
-			expectedList: []framework.NodeScore{{Name: "node1", Score: 87}, {Name: "node2", Score: framework.MaxNodeScore}},
-			name:         "nothing scheduled, resources requested, differently sized nodes",
-			args:         config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore:  true,
+			pod:                    &v1.Pod{Spec: cpuAndMemory},
+			nodes:                  []*v1.Node{makeNode("node1", 4000, 10000, nil), makeNode("node2", 6000, 10000, nil)},
+			expectedList:           []framework.NodeScore{{Name: "node1", Score: 87}, {Name: "node2", Score: framework.MaxNodeScore}},
+			name:                   "nothing scheduled, resources requested, differently sized nodes",
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Success,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -182,8 +185,9 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				st.MakePod().Node("node2").Labels(labels1).Obj(),
 				st.MakePod().Node("node2").Labels(labels1).Obj(),
 			},
-			args:        config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore: true,
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Skip,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -204,8 +208,9 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				st.MakePod().Node("node1").Obj(),
 				st.MakePod().Node("node1").Obj(),
 			},
-			args:        config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore: true,
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Skip,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -228,8 +233,9 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				{Spec: cpuOnly2, ObjectMeta: metav1.ObjectMeta{Labels: labels1}},
 				{Spec: cpuAndMemory, ObjectMeta: metav1.ObjectMeta{Labels: labels1}},
 			},
-			args:        config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore: true,
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Skip,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -250,8 +256,9 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				{Spec: cpuOnly},
 				{Spec: cpuAndMemory},
 			},
-			args:        config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore: true,
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Success,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -272,8 +279,9 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				{Spec: cpuOnly},
 				{Spec: cpuAndMemory},
 			},
-			args:        config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore: true,
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Success,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -295,8 +303,9 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				{Spec: cpuOnly},
 				{Spec: cpuAndMemory},
 			},
-			args:        config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore: true,
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Success,
 		},
 		{
 			pod:          st.MakePod().Obj(),
@@ -307,8 +316,9 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				{Spec: cpuOnly},
 				{Spec: cpuAndMemory},
 			},
-			args:        config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
-			runPreScore: true,
+			args:                   config.NodeResourcesBalancedAllocationArgs{Resources: defaultResourceBalancedAllocationSet},
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Skip,
 		},
 		// Node1 scores on 0-MaxNodeScore scale
 		// CPU Fraction: 3000 / 3500 = 85.71%
@@ -339,7 +349,8 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				{Name: string(v1.ResourceMemory), Weight: 1},
 				{Name: "nvidia.com/gpu", Weight: 1},
 			}},
-			runPreScore: true,
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Success,
 		},
 		// Only one node (node1) has the scalar resource, pod doesn't request the scalar resource and the scalar resource should be skipped for consideration.
 		// Node1: std = 0, score = 100
@@ -357,7 +368,8 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 				{Name: string(v1.ResourceCPU), Weight: 1},
 				{Name: "nvidia.com/gpu", Weight: 1},
 			}},
-			runPreScore: true,
+			runPreScore:            true,
+			wantPreScoreStatusCode: framework.Skip,
 		},
 		{
 			// Node1 scores on 0-MaxNodeScore scale
@@ -395,8 +407,8 @@ func TestNodeResourcesBalancedAllocation(t *testing.T) {
 			for i := range test.nodes {
 				if test.runPreScore {
 					status := p.(framework.PreScorePlugin).PreScore(ctx, state, test.pod, tf.BuildNodeInfos(test.nodes))
-					if !status.IsSuccess() {
-						t.Errorf("PreScore is expected to return success, but didn't. Got status: %v", status)
+					if status.Code() != test.wantPreScoreStatusCode {
+						t.Errorf("unexpected status code, want: %v, got: %v", test.wantPreScoreStatusCode, status.Code())
 					}
 				}
 				hostResult, status := p.(framework.ScorePlugin).Score(ctx, state, test.pod, test.nodes[i].Name)

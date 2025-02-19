@@ -37,8 +37,10 @@ type BalancedAllocation struct {
 	resourceAllocationScorer
 }
 
-var _ framework.PreScorePlugin = &BalancedAllocation{}
-var _ framework.ScorePlugin = &BalancedAllocation{}
+var (
+	_ framework.PreScorePlugin = &BalancedAllocation{}
+	_ framework.ScorePlugin    = &BalancedAllocation{}
+)
 
 // BalancedAllocationName is the name of the plugin used in the plugin registry and configurations.
 const (
@@ -63,8 +65,12 @@ func (s *balancedAllocationPreScoreState) Clone() framework.StateData {
 
 // PreScore calculates incoming pod's resource requests and writes them to the cycle state used.
 func (ba *BalancedAllocation) PreScore(ctx context.Context, cycleState *framework.CycleState, pod *v1.Pod, nodes []*framework.NodeInfo) *framework.Status {
+	podRequests := ba.calculatePodResourceRequestList(pod, ba.resources)
+	if ba.isBestEffortPod(podRequests) {
+		return framework.NewStatus(framework.Skip)
+	}
 	state := &balancedAllocationPreScoreState{
-		podRequests: ba.calculatePodResourceRequestList(pod, ba.resources),
+		podRequests: podRequests,
 	}
 	cycleState.Write(balancedAllocationPreScoreStateKey, state)
 	return nil
@@ -157,7 +163,6 @@ func balancedResourceScorer(requested, allocable []int64) int64 {
 	// Otherwise, set the std to zero is enough.
 	if len(resourceToFractions) == 2 {
 		std = math.Abs((resourceToFractions[0] - resourceToFractions[1]) / 2)
-
 	} else if len(resourceToFractions) > 2 {
 		mean := totalFraction / float64(len(resourceToFractions))
 		var sum float64
