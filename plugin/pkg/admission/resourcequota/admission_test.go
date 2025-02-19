@@ -911,8 +911,14 @@ func TestAdmitBelowTerminatingQuotaLimitWhenPodScopeUpdated(t *testing.T) {
 		t.Errorf("Error occurred while creating admission plugin: %v", err)
 	}
 
-	informerFactory.Core().V1().ResourceQuotas().Informer().GetIndexer().Add(resourceQuotaNonTerminating)
-	informerFactory.Core().V1().ResourceQuotas().Informer().GetIndexer().Add(resourceQuotaTerminating)
+	err = informerFactory.Core().V1().ResourceQuotas().Informer().GetIndexer().Add(resourceQuotaNonTerminating)
+	if err != nil {
+		t.Errorf("Error occurred while adding resource quota to the indexer: %v", err)
+	}
+	err = informerFactory.Core().V1().ResourceQuotas().Informer().GetIndexer().Add(resourceQuotaTerminating)
+	if err != nil {
+		t.Errorf("Error occurred while adding resource quota to the indexer: %v", err)
+	}
 
 	// old pod belonged to the non-terminating scope, but updated version belongs to the terminating scope
 	existingPod := validPod("allowed-pod", 1, getResourceRequirements(getResourceList("100m", "2Gi"), getResourceList("", "")))
