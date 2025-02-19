@@ -175,7 +175,9 @@ func TestEventHandlers_MoveToActiveOnNominatedNodeUpdate(t *testing.T) {
 						t.Fatalf("Pop failed: %v", err)
 					}
 					poppedPod.UnschedulablePlugins = sets.New("fooPlugin1")
-					queue.AddUnschedulableIfNotPresent(logger, poppedPod, queue.SchedulingCycle())
+					if err := queue.AddUnschedulableIfNotPresent(logger, poppedPod, queue.SchedulingCycle()); err != nil {
+						t.Errorf("Unexpected error from AddUnschedulableIfNotPresent: %v", err)
+					}
 				}
 
 				s, _, err := initScheduler(ctx, schedulerCache, queue, client, informerFactory)

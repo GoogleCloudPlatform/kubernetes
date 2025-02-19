@@ -1168,7 +1168,7 @@ func WaitForNominatedNodeNameWithTimeout(ctx context.Context, cs clientset.Inter
 		}
 		return false, err
 	}); err != nil {
-		return fmt.Errorf(".status.nominatedNodeName of Pod %v/%v did not get set: %v", pod.Namespace, pod.Name, err)
+		return fmt.Errorf(".status.nominatedNodeName of Pod %v/%v did not get set: %w", pod.Namespace, pod.Name, err)
 	}
 	return nil
 }

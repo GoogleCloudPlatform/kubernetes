@@ -201,7 +201,9 @@ func TestUpdateNominatedNodeName(t *testing.T) {
 		{
 			name: "Remove nominated pod",
 			updateFunc: func(testCtx *testutils.TestContext) {
-				testutils.DeletePod(testCtx.ClientSet, podMidNominated.Name, podMidNominated.Namespace)
+				if err := testutils.DeletePod(testCtx.ClientSet, podMidNominated.Name, podMidNominated.Namespace); err != nil {
+					t.Fatalf("Deleting pod error: %v", err)
+				}
 			},
 		},
 	}
@@ -246,7 +248,9 @@ func TestUpdateNominatedNodeName(t *testing.T) {
 				}
 
 				// Remove the initial, which will move the nominated unschedulable back to the backoff queue.
-				testutils.DeletePod(testCtx.ClientSet, podLow.Name, podLow.Namespace)
+				if err := testutils.DeletePod(testCtx.ClientSet, podLow.Name, podLow.Namespace); err != nil {
+					t.Fatalf("Deleting pod error: %v", err)
+				}
 
 				// Create another low-priority pods which cannot be scheduled due to resource constraints.
 				pod, err = testutils.CreatePausePod(testCtx.ClientSet, podLow)
