@@ -19,13 +19,11 @@ package node
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientscheme "k8s.io/client-go/kubernetes/scheme"
@@ -52,12 +50,8 @@ var _ = SIGDescribe("Ephemeral Containers", framework.WithNodeConformance(), fun
 	// Description: Adding an ephemeral container to pod.spec MUST result in the container running.
 	framework.ConformanceIt("will start an ephemeral container in an existing pod", func(ctx context.Context) {
 		ginkgo.By("creating a target pod")
-		value := strconv.Itoa(time.Now().Nanosecond())
 		pod := podClient.CreateSync(ctx, &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "ephemeral-containers-target-pod",
-				Labels: map[string]string{"time": value},
-			},
+			ObjectMeta: metav1.ObjectMeta{Name: "ephemeral-containers-target-pod"},
 			Spec: v1.PodSpec{
 				Containers: []v1.Container{
 					{
@@ -86,12 +80,9 @@ var _ = SIGDescribe("Ephemeral Containers", framework.WithNodeConformance(), fun
 		framework.ExpectNoError(err, "Failed to patch ephemeral containers in pod %q", e2epod.FormatPod(pod))
 
 		ginkgo.By("verifying the pod's generation is 2")
-		selector := labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
-		options := metav1.ListOptions{LabelSelector: selector.String()}
-		pods, err := podClient.List(ctx, options)
+		pod, err = podClient.Get(ctx, pod.Name, metav1.GetOptions{})
 		framework.ExpectNoError(err, "failed to query for pod")
-		gomega.Expect(pods.Items).To(gomega.HaveLen(1))
-		gomega.Expect(pods.Items[0].Generation).To(gomega.BeEquivalentTo(2))
+		gomega.Expect(pod.Generation).To(gomega.BeEquivalentTo(2))
 
 		ginkgo.By("checking pod container endpoints")
 		// Can't use anything depending on kubectl here because it's not available in the node test environment
@@ -112,12 +103,8 @@ var _ = SIGDescribe("Ephemeral Containers", framework.WithNodeConformance(), fun
 	*/
 	framework.ConformanceIt("should update the ephemeral containers in an existing pod", func(ctx context.Context) {
 		ginkgo.By("creating a target pod")
-		value := strconv.Itoa(time.Now().Nanosecond())
 		pod := podClient.CreateSync(ctx, &v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "ephemeral-containers-target-pod",
-				Labels: map[string]string{"time": value},
-			},
+			ObjectMeta: metav1.ObjectMeta{Name: "ephemeral-containers-target-pod"},
 			Spec: v1.PodSpec{
 				Containers: []v1.Container{
 					{
@@ -146,12 +133,9 @@ var _ = SIGDescribe("Ephemeral Containers", framework.WithNodeConformance(), fun
 		framework.ExpectNoError(err, "Failed to patch ephemeral containers in pod %q", e2epod.FormatPod(pod))
 
 		ginkgo.By("verifying the pod's generation is 2")
-		selector := labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
-		options := metav1.ListOptions{LabelSelector: selector.String()}
-		pods, err := podClient.List(ctx, options)
+		pod, err = podClient.Get(ctx, pod.Name, metav1.GetOptions{})
 		framework.ExpectNoError(err, "failed to query for pod")
-		gomega.Expect(pods.Items).To(gomega.HaveLen(1))
-		gomega.Expect(pods.Items[0].Generation).To(gomega.BeEquivalentTo(2))
+		gomega.Expect(pod.Generation).To(gomega.BeEquivalentTo(2))
 
 		ginkgo.By("checking pod container endpoints")
 		// Can't use anything depending on kubectl here because it's not available in the node test environment

@@ -530,27 +530,17 @@ var _ = SIGDescribe("Pods Extended", func() {
 			}
 			pod.SetGeneration(100)
 
-			ginkgo.By("setting up selector")
-			selector := labels.SelectorFromSet(labels.Set(map[string]string{"time": value}))
-			options := metav1.ListOptions{LabelSelector: selector.String()}
-			pods, err := podClient.List(ctx, options)
-			framework.ExpectNoError(err, "failed to query for pod")
-			gomega.Expect(pods.Items).To(gomega.BeEmpty())
-
 			ginkgo.By("submitting the pod to kubernetes")
-			podClient.Create(ctx, pod)
+			pod = podClient.CreateSync(ctx, pod)
 
 			ginkgo.By("verifying the new pod's generation is 1")
-			pods, err = podClient.List(ctx, options)
-			framework.ExpectNoError(err, "failed to query for pod")
-			gomega.Expect(pods.Items).To(gomega.HaveLen(1))
-			gomega.Expect(pods.Items[0].Generation).To(gomega.BeEquivalentTo(1))
+			gomega.Expect(pod.Generation).To(gomega.BeEquivalentTo(1))
 
 			ginkgo.By("issue a graceful delete to trigger generation bump")
 			// We need to wait for the pod to be running, otherwise the deletion
 			// may be carried out immediately rather than gracefully.
 			framework.ExpectNoError(e2epod.WaitForPodNameRunningInNamespace(ctx, f.ClientSet, pod.Name, f.Namespace.Name))
-			pod, err = podClient.Get(ctx, pod.Name, metav1.GetOptions{})
+			pod, err := podClient.Get(ctx, pod.Name, metav1.GetOptions{})
 			framework.ExpectNoError(err, "failed to GET scheduled pod")
 
 			var lastPod v1.Pod
@@ -561,10 +551,9 @@ var _ = SIGDescribe("Pods Extended", func() {
 			gomega.Expect(statusCode).To(gomega.Equal(http.StatusOK), "failed to delete gracefully by client request")
 
 			ginkgo.By("verifying the pod generation was bumped")
-			pods, err = podClient.List(ctx, options)
+			pod, err = podClient.Get(ctx, pod.Name, metav1.GetOptions{})
 			framework.ExpectNoError(err, "failed to query for pod")
-			gomega.Expect(pods.Items).To(gomega.HaveLen(1))
-			gomega.Expect(pods.Items[0].Generation).To(gomega.BeEquivalentTo(2))
+			gomega.Expect(pod.Generation).To(gomega.BeEquivalentTo(2))
 		})
 	})
 })
