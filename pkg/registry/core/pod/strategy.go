@@ -360,11 +360,8 @@ func (p podResizeStrategy) GetResetFieldsFilter() map[fieldpath.APIVersion]field
 // dropPodUpdates drops any changes in the pod.
 func dropPodUpdates(newPod, oldPod *api.Pod) *api.Pod {
 	pod := oldPod.DeepCopy()
-	pod.Name = newPod.Name
-	pod.Namespace = newPod.Namespace
 	pod.ResourceVersion = newPod.ResourceVersion
-	pod.UID = newPod.UID
-
+	pod.ManagedFields = newPod.ManagedFields
 	return pod
 }
 

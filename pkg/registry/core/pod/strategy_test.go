@@ -1139,33 +1139,6 @@ func TestDropNonEphemeralContainerUpdates(t *testing.T) {
 			},
 		},
 		{
-			name: "whoops wrong pod",
-			oldPod: &api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:            "test-pod",
-					Namespace:       "test-ns",
-					ResourceVersion: "1",
-					UID:             "blue",
-				},
-			},
-			newPod: &api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:            "new-pod",
-					Namespace:       "new-ns",
-					ResourceVersion: "1",
-					UID:             "green",
-				},
-			},
-			wantPod: &api.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:            "new-pod",
-					Namespace:       "new-ns",
-					ResourceVersion: "1",
-					UID:             "green",
-				},
-			},
-		},
-		{
 			name: "resource conflict during update",
 			oldPod: &api.Pod{
 				ObjectMeta: metav1.ObjectMeta{
