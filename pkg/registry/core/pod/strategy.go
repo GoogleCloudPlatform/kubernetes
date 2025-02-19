@@ -105,7 +105,7 @@ func (podStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.Object
 	oldPod := old.(*api.Pod)
 	newPod.Status = oldPod.Status
 	podutil.DropDisabledPodFields(newPod, oldPod)
-	bumpGenerationForPodSpecUpdate(newPod, oldPod)
+	updatePodGeneration(newPod, oldPod)
 }
 
 // Validate validates a new pod.
@@ -262,7 +262,7 @@ func (podEphemeralContainersStrategy) PrepareForUpdate(ctx context.Context, obj,
 
 	*newPod = *dropNonEphemeralContainerUpdates(newPod, oldPod)
 	podutil.DropDisabledPodFields(newPod, oldPod)
-	bumpGenerationForPodSpecUpdate(newPod, oldPod)
+	updatePodGeneration(newPod, oldPod)
 }
 
 func (podEphemeralContainersStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
@@ -337,7 +337,7 @@ func (podResizeStrategy) PrepareForUpdate(ctx context.Context, obj, old runtime.
 	*newPod = *dropNonResizeUpdates(newPod, oldPod)
 	podutil.MarkPodProposedForResize(oldPod, newPod)
 	podutil.DropDisabledPodFields(newPod, oldPod)
-	bumpGenerationForPodSpecUpdate(newPod, oldPod)
+	updatePodGeneration(newPod, oldPod)
 }
 
 func (podResizeStrategy) ValidateUpdate(ctx context.Context, obj, old runtime.Object) field.ErrorList {
@@ -980,9 +980,9 @@ func apparmorFieldForAnnotation(annotation string) *api.AppArmorProfile {
 	return nil
 }
 
-// bumpGenerationForPodSpecUpdate bumps metadata.generation if needed for any updates
+// updatePodGeneration bumps metadata.generation if needed for any updates
 // to the podspec.
-func bumpGenerationForPodSpecUpdate(newPod, oldPod *api.Pod) {
+func updatePodGeneration(newPod, oldPod *api.Pod) {
 	if !apiequality.Semantic.DeepEqual(newPod.Spec, oldPod.Spec) {
 		newPod.Generation++
 	}
