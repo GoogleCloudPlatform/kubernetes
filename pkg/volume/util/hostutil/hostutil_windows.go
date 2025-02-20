@@ -29,7 +29,6 @@ import (
 
 	"golang.org/x/sys/windows"
 	"k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/util/filesystem"
 	"k8s.io/mount-utils"
 	utilpath "k8s.io/utils/path"
 )
@@ -103,14 +102,6 @@ func isSystemCannotAccessErr(err error) bool {
 func (hu *(HostUtil)) GetFileType(pathname string) (FileType, error) {
 	filetype, err := getFileType(pathname)
 
-	// os.Stat will return a 1920 error (windows.ERROR_CANT_ACCESS_FILE) if we use it on a Unix Socket
-	// on Windows. In this case, we need to use a different method to check if it's a Unix Socket.
-	if err == errUnknownFileType || isSystemCannotAccessErr(err) {
-		if isSocket, errSocket := filesystem.IsUnixDomainSocket(pathname); errSocket == nil && isSocket {
-			return FileTypeSocket, nil
-		}
-	}
-
 	return filetype, err
 }
 
@@ -142,6 +133,9 @@ func (hu *HostUtil) GetMode(pathname string) (os.FileMode, error) {
 	info, err := os.Stat(pathname)
 	if err != nil {
 		return 0, err
+	}
+	if info.Mode()&os.ModeIrregular != 0 {
+		return 0, fmt.Errorf("subPath %s is an irregular file", pathname)
 	}
 	return info.Mode(), nil
 }
