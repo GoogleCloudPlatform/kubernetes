@@ -101,8 +101,7 @@ func (n nodeAuthorizerAttributesGetter) GetRequestAttributes(u user.Info, r *htt
 			subresources = append(subresources, "pods")
 		case isSubpath(requestPath, healthz.DefaultHealthzPath):
 			subresources = append(subresources, "healthz")
-		case isSubpath(requestPath, configz.DefaultConfigzPath),
-			isSubpath(requestPath, flagz.DefaultFlagzPath):
+		case isSubpath(requestPath, configz.DefaultConfigzPath):
 			subresources = append(subresources, "configz")
 		// We put runningpods last since it will allocate a new string on every
 		// check since the handler path has a trailing slash.
@@ -123,6 +122,8 @@ func (n nodeAuthorizerAttributesGetter) GetRequestAttributes(u user.Info, r *htt
 		subresources = append(subresources, "checkpoint")
 	case isSubpath(requestPath, statusz.DefaultStatuszPath):
 		subresources = append(subresources, "statusz")
+	case isSubpath(requestPath, flagz.DefaultFlagzPath):
+		subresources = append(subresources, "configz")
 	default:
 		subresources = append(subresources, "proxy")
 	}
