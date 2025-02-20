@@ -44,6 +44,8 @@ type threadedStoreIndexer struct {
 	indexer indexer
 }
 
+var _ orderedLister = (*threadedStoreIndexer)(nil)
+
 func (si *threadedStoreIndexer) Add(obj interface{}) error {
 	return si.addOrUpdate(obj)
 }
@@ -136,6 +138,12 @@ func newBtreeStore(degree int) btreeStore {
 
 type btreeStore struct {
 	tree *btree.BTreeG[*storeElement]
+}
+
+func (s *btreeStore) Clone() orderedLister {
+	return &btreeStore{
+		tree: s.tree.Clone(),
+	}
 }
 
 func (s *btreeStore) Add(obj interface{}) error {

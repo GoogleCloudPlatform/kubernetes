@@ -24,6 +24,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -1246,4 +1249,54 @@ func TestHistogramCacheReadWait(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCacheSnapshotsCleanup(t *testing.T) {
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ListFromCacheSnapshot, true)
+
+	store := newTestWatchCache(3, DefaultEventFreshDuration, &cache.Indexers{})
+	defer store.Stop()
+	store.upperBoundCapacity = 3
+
+	assert.False(t, store.orderedListerSnapshots.HasLessOrEqual(100), "Expected empty cache to not include any snapshots")
+	require.NoError(t, store.Add(makeTestPod("foo", 100)))
+	require.NoError(t, store.Update(makeTestPod("foo", 200)))
+	require.NoError(t, store.Delete(makeTestPod("foo", 300)))
+
+	t.Log("Test cache on rev 100")
+	assert.False(t, store.orderedListerSnapshots.HasLessOrEqual(99), "Expected store to not include rev 99")
+	assert.True(t, store.orderedListerSnapshots.HasLessOrEqual(100), "Expected store to not include rev 100")
+	lister, _ := store.orderedListerSnapshots.GetLessOrEqual(100)
+	elements, _ := lister.ListPrefix("", "", 0)
+	assert.Len(t, elements, 1)
+	assert.Equal(t, makeTestPod("foo", 100), elements[0].(*storeElement).Object)
+
+	t.Log("Overflow cache to remove rev 100")
+	require.NoError(t, store.Add(makeTestPod("foo", 400)))
+	assert.False(t, store.orderedListerSnapshots.HasLessOrEqual(100), "Expected overfilled cache to delete oldest rev 100")
+	assert.True(t, store.orderedListerSnapshots.HasLessOrEqual(200), "Expected store to still keep rev 200")
+	lister, _ = store.orderedListerSnapshots.GetLessOrEqual(200)
+	elements, _ = lister.ListPrefix("", "", 0)
+	assert.Len(t, elements, 1)
+	assert.Equal(t, makeTestPod("foo", 200), elements[0].(*storeElement).Object)
+
+	t.Log("Overflow cache to remove rev 200")
+	require.NoError(t, store.Update(makeTestPod("foo", 500)))
+	assert.False(t, store.orderedListerSnapshots.HasLessOrEqual(200), "Expected overfilled cache to delete oldest rev 200")
+	assert.True(t, store.orderedListerSnapshots.HasLessOrEqual(300), "Expected store to still keep rev 300")
+	lister, _ = store.orderedListerSnapshots.GetLessOrEqual(300)
+	elements, _ = lister.ListPrefix("", "", 0)
+	assert.Empty(t, elements)
+
+	t.Log("Replace cache to remove history")
+	assert.True(t, store.orderedListerSnapshots.HasLessOrEqual(500), "Confirm that cache stores history before replace")
+	err := store.Replace([]interface{}{makeTestPod("foo", 600)}, "700")
+	require.NoError(t, err)
+	assert.False(t, store.orderedListerSnapshots.HasLessOrEqual(500), "Expected replace to remove history")
+	assert.False(t, store.orderedListerSnapshots.HasLessOrEqual(600), "Expected replace to remove history")
+	assert.True(t, store.orderedListerSnapshots.HasLessOrEqual(700), "Expected replace to be snapshotted")
+	lister, _ = store.orderedListerSnapshots.GetLessOrEqual(700)
+	elements, _ = lister.ListPrefix("", "", 0)
+	assert.Len(t, elements, 1)
+	assert.Equal(t, makeTestPod("foo", 600), elements[0].(*storeElement).Object)
 }
