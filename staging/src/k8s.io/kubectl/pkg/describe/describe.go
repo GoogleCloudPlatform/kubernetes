@@ -2573,6 +2573,15 @@ func (d *SecretDescriber) Describe(namespace, name string, describerSettings Des
 	return describeSecret(secret)
 }
 
+func sortStrings[T any](data map[string]T) []string {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func describeSecret(secret *corev1.Secret) (string, error) {
 	return tabbedString(func(out io.Writer) error {
 		w := NewPrefixWriter(out)
@@ -2584,12 +2593,12 @@ func describeSecret(secret *corev1.Secret) (string, error) {
 		w.Write(LEVEL_0, "\nType:\t%s\n", secret.Type)
 
 		w.Write(LEVEL_0, "\nData\n====\n")
-		for k, v := range secret.Data {
+		for _, k := range sortStrings(secret.Data) {
 			switch {
 			case k == corev1.ServiceAccountTokenKey && secret.Type == corev1.SecretTypeServiceAccountToken:
-				w.Write(LEVEL_0, "%s:\t%s\n", k, string(v))
+				w.Write(LEVEL_0, "%s:\t%s\n", k, string(secret.Data[k]))
 			default:
-				w.Write(LEVEL_0, "%s:\t%d bytes\n", k, len(v))
+				w.Write(LEVEL_0, "%s:\t%d bytes\n", k, len(secret.Data[k]))
 			}
 		}
 
