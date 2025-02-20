@@ -32,6 +32,7 @@ import (
 )
 
 const InfiniteSleepCommand = "trap exit TERM; while true; do sleep 1; done"
+const InfiniteSleepCommandWithoutGracefulShutdown = "sleep infinity"
 
 // GenerateScriptCmd generates the corresponding command lines to execute a command.
 func GenerateScriptCmd(command string) []string {
