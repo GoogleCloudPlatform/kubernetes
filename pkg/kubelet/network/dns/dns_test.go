@@ -18,7 +18,6 @@ package dns
 
 import (
 	"fmt"
-	"k8s.io/kubernetes/test/utils/ktesting"
 	"net"
 	"os"
 	"strconv"
@@ -32,6 +31,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 	"k8s.io/kubernetes/pkg/apis/core/validation"
+	"k8s.io/kubernetes/test/utils/ktesting"
 	netutils "k8s.io/utils/net"
 
 	"github.com/stretchr/testify/assert"

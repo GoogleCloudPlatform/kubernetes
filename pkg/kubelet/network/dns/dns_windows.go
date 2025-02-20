@@ -26,10 +26,10 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -76,7 +76,7 @@ func fileExists(filename string) (bool, error) {
 	return stat.Mode().IsRegular(), nil
 }
 
-func getHostDNSConfig(logger logr.Logger, resolverConfig string) (*runtimeapi.DNSConfig, error) {
+func getHostDNSConfig(logger klog.Logger, resolverConfig string) (*runtimeapi.DNSConfig, error) {
 	if resolverConfig == "" {
 		// This handles "" by returning defaults.
 		return getDNSConfig(logger, resolverConfig)
