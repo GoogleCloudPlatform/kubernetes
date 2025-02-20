@@ -745,29 +745,34 @@ func shouldDelegateListOnNotReadyCache(opts storage.ListOptions) bool {
 	return noLabelSelector && noFieldSelector && hasLimit
 }
 
-func (c *Cacher) listItems(ctx context.Context, listRV uint64, key string, pred storage.SelectionPredicate, recursive bool) (listResp, string, error) {
-	if !recursive {
+func (c *Cacher) listItems(ctx context.Context, listRV uint64, key string, opts storage.ListOptions) (listResp, string, error) {
+	if !opts.Recursive {
 		obj, exists, readResourceVersion, err := c.watchCache.WaitUntilFreshAndGet(ctx, listRV, key)
 		if err != nil {
 			return listResp{}, "", err
 		}
 		if exists {
-			return listResp{Items: []interface{}{obj}, ResourceVersion: readResourceVersion}, "", nil
+			return listResp{
+				Items:           []interface{}{obj},
+				ItemCount:       1,
+				ResourceVersion: readResourceVersion,
+			}, "", nil
 		}
 		return listResp{ResourceVersion: readResourceVersion}, "", nil
 	}
-	return c.watchCache.WaitUntilFreshAndList(ctx, listRV, key, pred.MatcherIndex(ctx))
+	return c.watchCache.WaitUntilFreshAndList(ctx, listRV, key, opts)
 }
 
 type listResp struct {
-	Items           []interface{}
+	Items   []interface{}
+	HasMore bool
+	// Return ItemCount but only if pred.Empty()
+	ItemCount       int64
 	ResourceVersion uint64
 }
 
 // GetList implements storage.Interface
 func (c *Cacher) GetList(ctx context.Context, key string, opts storage.ListOptions, listObj runtime.Object, listRV uint64) error {
-	recursive := opts.Recursive
-	pred := opts.Predicate
 	// For recursive lists, we need to make sure the key ended with "/" so that we only
 	// get children "directories". e.g. if we have key "/a", "/a/b", "/ab", getting keys
 	// with prefix "/a" will return all three, while with prefix "/a/" will return only
@@ -808,7 +813,7 @@ func (c *Cacher) GetList(ctx context.Context, key string, opts storage.ListOptio
 		return fmt.Errorf("need a pointer to slice, got %v", listVal.Kind())
 	}
 
-	resp, indexUsed, err := c.listItems(ctx, listRV, preparedKey, pred, recursive)
+	resp, indexUsed, err := c.listItems(ctx, listRV, preparedKey, opts)
 	if err != nil {
 		return err
 	}
@@ -819,19 +824,21 @@ func (c *Cacher) GetList(ctx context.Context, key string, opts storage.ListOptio
 	//   so we try to delay this action as much as possible
 	var selectedObjects []runtime.Object
 	var lastSelectedObjectKey string
-	var hasMoreListItems bool
+	hasMoreListItems := resp.HasMore
 	limit := computeListLimit(opts)
 	for i, obj := range resp.Items {
 		elem, ok := obj.(*storeElement)
 		if !ok {
 			return fmt.Errorf("non *storeElement returned from storage: %v", obj)
 		}
-		if pred.MatchesObjectAttributes(elem.Labels, elem.Fields) {
+		if opts.Predicate.MatchesObjectAttributes(elem.Labels, elem.Fields) {
 			selectedObjects = append(selectedObjects, elem.Object)
 			lastSelectedObjectKey = elem.Key
 		}
 		if limit > 0 && int64(len(selectedObjects)) >= limit {
-			hasMoreListItems = i < len(resp.Items)-1
+			if i < len(resp.Items)-1 {
+				hasMoreListItems = true
+			}
 			break
 		}
 	}
@@ -848,7 +855,7 @@ func (c *Cacher) GetList(ctx context.Context, key string, opts storage.ListOptio
 	}
 	span.AddEvent("Filtered items", attribute.Int("count", listVal.Len()))
 	if c.versioner != nil {
-		continueValue, remainingItemCount, err := storage.PrepareContinueToken(lastSelectedObjectKey, key, int64(resp.ResourceVersion), int64(len(resp.Items)), hasMoreListItems, opts)
+		continueValue, remainingItemCount, err := storage.PrepareContinueToken(lastSelectedObjectKey, key, int64(resp.ResourceVersion), resp.ItemCount, hasMoreListItems, opts)
 		if err != nil {
 			return err
 		}
